@@ -1,0 +1,73 @@
+/*
+  Dual Serial Communication for Raspberry Pi Pico W
+  
+  This file provides wrapper functions to seamlessly handle both
+  USB Serial and Bluetooth Serial communication. Commands can come
+  from either source, and responses go to both.
+  
+  Usage: Replace Serial.println() with println(), Serial.available() with available(), etc.
+*/
+
+#include "BluetoothSerial.h"
+
+// Create Bluetooth Serial object
+BluetoothSerial SerialBT;
+
+// Initialize both serial communications
+void initDualSerial() {
+  // Initialize USB Serial
+  Serial.begin(115200);
+  
+  // Initialize Bluetooth Serial
+  SerialBT.begin("RobotArm_PicoW"); // Bluetooth device name
+  
+  delay(1000);
+  println("Dual Serial initialized - USB and Bluetooth ready");
+}
+
+// --- DUAL SERIAL WRAPPER FUNCTIONS ---
+// These functions automatically send output to both USB Serial and Bluetooth Serial
+// and read input from whichever source has data available
+
+template<typename T>
+void println(const T& msg) {
+  Serial.println(msg);
+  SerialBT.println(msg);
+}
+
+template<typename T>
+void print(const T& msg) {
+  Serial.print(msg);
+  SerialBT.print(msg);
+}
+
+bool available() {
+  return Serial.available() || SerialBT.available();
+}
+
+String readStringUntil(char terminator) {
+  if (Serial.available()) {
+    return Serial.readStringUntil(terminator);
+  } else if (SerialBT.available()) {
+    return SerialBT.readStringUntil(terminator);
+  }
+  return "";
+}
+
+char read() {
+  if (Serial.available()) {
+    return Serial.read();
+  } else if (SerialBT.available()) {
+    return SerialBT.read();
+  }
+  return 0; // No data available
+}
+
+// Optional: Check which source has data
+bool usbAvailable() {
+  return Serial.available();
+}
+
+bool bluetoothAvailable() {
+  return SerialBT.available();
+}

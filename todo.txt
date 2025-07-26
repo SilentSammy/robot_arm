@@ -1,0 +1,11 @@
+-- Figure out exact pulse width to map 0-180 in code to 0-180 irl, or perhaps use correct voltage
+- Allow BT serial too.
++ Set up a "Joint" class to wrap around a servo object. The class should have an update method that gets polled constantly from the main loop to make it work.
++ set lbounds and ubounds to Joint
++ design a versatile and expandable command scheme
++ also implement increments equivalents for snapTo and moveTo
++ clean up unneccessary prints
++ clean up unneccessary commands (bounds)
+- implement a method to know how long a joint has been at its goal
+- implement arm_rc.py
+- 

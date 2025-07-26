@@ -1,0 +1,160 @@
+/*
+  Dual Servo Control for Robot Arm
+  
+  Wiring:
+  - Servo A Red wire:    +9V battery positive
+  - Servo A Brown wire:  Battery ground AND Pico W ground (common ground!)
+  - Servo A Yellow wire: GPIO 16 (PWM capable pin)
+  - Servo B Red wire:    +9V battery positive  
+  - Servo B Brown wire:  Battery ground AND Pico W ground (common ground!)
+  - Servo B Yellow wire: GPIO 17 (PWM capable pin)
+  
+  Commands: A90, B180, Aoff, Bon, etc.
+*/
+
+#include <Servo.h>
+
+// Create servo objects
+Servo servoA;
+Servo servoB;
+
+// Define the servo pins (PWM capable)
+const int servoPinA = 16;  // GPIO 16 for Servo A
+const int servoPinB = 17;  // GPIO 17 for Servo B
+
+// Track current positions
+int currentAngleA = 90;
+int currentAngleB = 90;
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("Dual Servo Control Starting...");
+  Serial.println("Commands: A90, B45, A+, B--, Aoff, Bon, etc.");
+  Serial.println("+ increments by 15°, - decrements by 15°, ++ by 30°, -- by 30°");
+  Serial.println("Servo A: Pin 16, Servo B: Pin 17");
+  
+  // Use calibrated pulse width range for true 180° mapping
+  servoA.attach(servoPinA, 600, 2400);  // Servo A on pin 16
+  servoB.attach(servoPinB, 600, 2400);  // Servo B on pin 17
+  
+  // Move both servos to center position (90 degrees)
+  servoA.write(currentAngleA);
+  servoB.write(currentAngleB);
+  Serial.println("Both servos initialized at 90 degrees");
+}
+
+void loop() {
+  // Check if data is available to read
+  if (Serial.available() > 0) {
+    // Read the incoming command
+    String input = Serial.readStringUntil('\n');
+    input.trim(); // Remove any whitespace
+    input.toUpperCase(); // Convert to uppercase for consistency
+    
+    // Parse command: first character should be A or B
+    if (input.length() >= 2) {
+      char servo = input.charAt(0);  // A or B
+      String command = input.substring(1); // Rest of the command
+      
+      if (servo == 'A') {
+        handleServoCommand(servoA, servoPinA, "Servo A", command, currentAngleA);
+      }
+      else if (servo == 'B') {
+        handleServoCommand(servoB, servoPinB, "Servo B", command, currentAngleB);
+      }
+      else {
+        Serial.println("Error: Command must start with A or B");
+        Serial.println("Examples: A90, B45, A+, B--, AOFF, BON");
+      }
+    }
+    else {
+      Serial.println("Error: Invalid command format");
+      Serial.println("Examples: A90, B180, A+, B--, AOFF, BON");
+    }
+  }
+}
+
+void handleServoCommand(Servo &servo, int pin, String servoName, String command, int &currentAngle) {
+  if (command == "OFF" || command == "DISCONNECT") {
+    // Detach servo - stops PWM signal
+    servo.detach();
+    Serial.println(servoName + " disconnected - PWM signal stopped");
+  }
+  else if (command == "ON" || command == "CONNECT") {
+    // Reattach servo
+    servo.attach(pin, 600, 2400);
+    Serial.println(servoName + " reconnected - PWM signal restored");
+  }
+  else if (command == "+" || command == "PLUS") {
+    // Increment by 15 degrees
+    int newAngle = currentAngle + 15;
+    if (newAngle <= 180) {
+      moveServoToAngle(servo, pin, servoName, newAngle, currentAngle);
+    } else {
+      Serial.println("Error: " + servoName + " cannot go above 180° (would be " + String(newAngle) + "°)");
+    }
+  }
+  else if (command == "-" || command == "MINUS") {
+    // Decrement by 15 degrees
+    int newAngle = currentAngle - 15;
+    if (newAngle >= 0) {
+      moveServoToAngle(servo, pin, servoName, newAngle, currentAngle);
+    } else {
+      Serial.println("Error: " + servoName + " cannot go below 0° (would be " + String(newAngle) + "°)");
+    }
+  }
+  else if (command == "++" || command == "PLUSPLUS") {
+    // Increment by 30 degrees
+    int newAngle = currentAngle + 30;
+    if (newAngle <= 180) {
+      moveServoToAngle(servo, pin, servoName, newAngle, currentAngle);
+    } else {
+      Serial.println("Error: " + servoName + " cannot go above 180° (would be " + String(newAngle) + "°)");
+    }
+  }
+  else if (command == "--" || command == "MINUSMINUS") {
+    // Decrement by 30 degrees
+    int newAngle = currentAngle - 30;
+    if (newAngle >= 0) {
+      moveServoToAngle(servo, pin, servoName, newAngle, currentAngle);
+    } else {
+      Serial.println("Error: " + servoName + " cannot go below 0° (would be " + String(newAngle) + "°)");
+    }
+  }
+  else {
+    // Try to parse as angle
+    int angle = command.toInt();
+    
+    // Validate the angle range
+    if (angle >= 0 && angle <= 180) {
+      moveServoToAngle(servo, pin, servoName, angle, currentAngle);
+    } else {
+      Serial.println("Error: " + servoName + " angle must be 0-180");
+      char servoLetter = servoName.charAt(6); // Extract 'A' or 'B' from "Servo A"/"Servo B"
+      Serial.print("Valid commands: ");
+      Serial.print(servoLetter);
+      Serial.print("90, ");
+      Serial.print(servoLetter);
+      Serial.print("+, ");
+      Serial.print(servoLetter);
+      Serial.print("-, ");
+      Serial.print(servoLetter);
+      Serial.println("OFF");
+    }
+  }
+}
+
+void moveServoToAngle(Servo &servo, int pin, String servoName, int angle, int &currentAngle) {
+  // Make sure servo is attached before writing
+  if (!servo.attached()) {
+    servo.attach(pin, 600, 2400);
+    Serial.println("Auto-reconnecting " + servoName + "...");
+  }
+  
+  int oldAngle = currentAngle;  // Store old angle before updating
+  servo.write(angle);
+  currentAngle = angle;  // Update tracked position
+  Serial.println(servoName + " moved from " + String(oldAngle) + "° to " + String(angle) + "°");
+}
