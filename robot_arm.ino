@@ -45,11 +45,11 @@ void setup() {
 
 
   // Initialize joints
-  joints[0].lbound = 15;        // Elbow bounds
+  joints[0].lbound = 60;        // Shoulder bounds
+  joints[0].ubound = 120;
   joints[0].start();
   
-  joints[1].lbound = 60;        // Shoulder bounds
-  joints[1].ubound = 120;
+  joints[1].lbound = 15;        // Elbow bounds
   joints[1].start();
   
   Serial.println("Ready");

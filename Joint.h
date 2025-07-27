@@ -12,8 +12,6 @@ private:
   float target;
   float speed;
   bool isAttached;  // Track servo attachment state
-  unsigned long targetReachedTime;  // Time when target was first reached
-  bool atTarget;  // Whether we're currently at target
 public:
   float lbound;  // Lower bound (minimum angle)
   float ubound;  // Upper bound (maximum angle)
@@ -27,8 +25,6 @@ public:
     lbound = 0.0;    // Default lower bound
     ubound = 180.0;  // Default upper bound
     isAttached = false;  // Start detached
-    targetReachedTime = 0;
-    atTarget = true;  // Start at target since currentAngle == target
   }
   
   void start() {
@@ -44,18 +40,6 @@ public:
   
   bool isStarted() {
     return isAttached;
-  }
-  
-  // Returns how long (in milliseconds) the joint has been at target
-  // Returns 0 if not at target
-  unsigned long timeAtTarget() {
-    if (!atTarget) return 0;
-    return millis() - targetReachedTime;
-  }
-  
-  // Returns true if joint is at target position
-  bool isDone() {
-    return atTarget;
   }
   
   void write(float angle) {
