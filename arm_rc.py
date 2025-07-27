@@ -2,7 +2,7 @@ import time
 from input_manager.input_man import is_pressed
 from robot_arm import RobotArm
 
-def joint_velocity_input(velocity_scale=20):
+def joint_velocity_input(velocity_scale=45):
     # Joint 0 controls
     joint0_vel = int(is_pressed("i")) - int(is_pressed("k"))
     

@@ -6,6 +6,7 @@
 + also implement increments equivalents for snapTo and moveTo
 + clean up unneccessary prints
 + clean up unneccessary commands (bounds)
-- implement a method to know how long a joint has been at its goal
-+- implement arm_rc.py
+- implement a method to know how long a joint has been at its target
+- stop joint when target has been reached for n seconds. restart when joint is no longer at target
++ implement arm_rc.py
 - create an Arm2D Class that stores within itself a sholder and elbow, and can accept cartesian commands.

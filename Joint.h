@@ -12,6 +12,7 @@ private:
   float target;
   float speed;
   bool isAttached;  // Track servo attachment state
+  unsigned long goalTime;  // Time when target was reached (-1 if not at target)
 public:
   float lbound;  // Lower bound (minimum angle)
   float ubound;  // Upper bound (maximum angle)
@@ -25,6 +26,7 @@ public:
     lbound = 0.0;    // Default lower bound
     ubound = 180.0;  // Default upper bound
     isAttached = false;  // Start detached
+    goalTime = -1;  // Not at target initially - force this even though currentAngle == target
   }
   
   void start() {
@@ -56,34 +58,77 @@ public:
   void moveTo(float targetAngle, float moveSpeed) {
     target = targetAngle;
     speed = moveSpeed;
+    goalTime = -1;  // Reset goal tracking when new target is set
   }
   
   // Helper method: Move by increment at specified speed
   void moveBy(float angleIncrement, float moveSpeed) {
     target = currentAngle + angleIncrement;
     speed = moveSpeed;
+    goalTime = -1;  // Reset goal tracking when new target is set
   }
 
   // Helper method: Snap instantly to angle (like standard servo.write)
   void snapTo(float angle) {
     speed = 32767.0;  // Max int value for instant movement
     target = angle;
+    goalTime = -1;  // Reset goal tracking when new target is set
   }
   
   // Helper method: Snap instantly by increment
   void snapBy(float angleIncrement) {
     speed = 32767.0;  // Max int value for instant movement
     target = currentAngle + angleIncrement;
+    goalTime = -1;  // Reset goal tracking when new target is set
   }
   
   // Helper method: Set angular velocity (continuous rotation style)
   void setAngularVel(float avel) {
     speed = abs(avel);  // Use magnitude for speed
     target = (avel >= 0) ? 180.0 : 0.0;  // Direction determines target
+    goalTime = -1;  // Reset goal tracking when new target is set
+  }
+
+  long getTimeAtGoal() {
+    if (goalTime == -1) {
+      return -1;  // Not at goal
+    } else {
+      return millis() - goalTime;  // Time elapsed since reaching goal
+    }
+  }
+
+  void updateGoal() {
+    float tolerance = 0;  // Close enough threshold
+    
+    // Check if we're at goal: either reached target position OR velocity is zero (stopped)
+    bool atGoal = (abs(currentAngle - target) <= tolerance) || (speed == 0);
+    
+    if (!atGoal) {
+      // Not at target and not stopped
+      goalTime = -1;
+    } else {
+      // At target or stopped - set goalTime only on first arrival
+      if (goalTime == -1) {
+        goalTime = millis();
+      }
+    }
   }
 
   void update() {
-    // Only update if servo is attached
+    // Auto-start/stop logic - check this BEFORE the early return
+    long timeAtGoal = getTimeAtGoal();
+    if (timeAtGoal > 2000) {  // 2 seconds at goal
+      if (isAttached) {
+        stop();
+      }
+    } else if (timeAtGoal == -1) {
+      // Not at goal - make sure servo is started
+      if (!isAttached) {
+        start();
+      }
+    }
+    
+    // Only update movement if servo is attached
     if (!isAttached) return;
     
     unsigned long currentTime = millis();
@@ -101,6 +146,9 @@ public:
     
     write(nextAngle);
     lastUpdateTime = currentTime;
+    
+    // Update goal tracking
+    updateGoal();
   }
 };
 
