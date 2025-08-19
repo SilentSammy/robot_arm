@@ -1,0 +1,4 @@
+- make ServoMotor class keep track of the written angle, update Joint and Arm2D classes to set their initial targets accordingly.
+- make ServoMotor class periodically save their last written angle to a file, and load it on init (to avoid sudden jumps on startup)
+- add BT commands (arm2D enabled, joints disabled by default)
+- add caster wheel and increase axle height slightly
