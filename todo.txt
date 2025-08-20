@@ -2,3 +2,5 @@
 - make ServoMotor class periodically save their last written angle to a file, and load it on init (to avoid sudden jumps on startup)
 - add BT commands (arm2D enabled, joints disabled by default)
 - add caster wheel and increase axle height slightly
+- add DC motor + encoder controller
+-- adress encoder accuracy concerns

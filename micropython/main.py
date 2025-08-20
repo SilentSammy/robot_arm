@@ -1,123 +1,90 @@
-# Main loop that imports Bluetooth serial functions
-import bt_serial
+import machine
+from machine import Pin, PWM
 import time
-from machine import Pin
+import math
+from oop import ServoMotor, Joint, Arm2D
 
-# Initialize LED pin
-led = Pin(2, Pin.OUT)  # Built-in LED on GPIO 2
+class Encoder:
+    def __init__(self, pin_a, pin_b):
+        """
+        Software quadrature encoder using interrupt-based counting.
+        pin_a: Channel A pin (main pulse signal)
+        pin_b: Channel B pin (for direction detection)
+        """
+        self.pin_a = Pin(pin_a, Pin.IN, Pin.PULL_UP)
+        self.pin_b = Pin(pin_b, Pin.IN, Pin.PULL_UP)
+        self.count = 0
+        self.last_a = self.pin_a.value()
+        
+        # Set up interrupt on pin A (rising and falling edges)
+        self.pin_a.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self._irq_handler)
+    
+    def _irq_handler(self, pin):
+        """Interrupt handler for encoder pin A changes - optimized for speed"""
+        # Read both pins once to avoid multiple GPIO reads
+        current_a = self.pin_a.value()
+        
+        # Only process if A actually changed (debounce noise)
+        if self.last_a != current_a:
+            current_b = self.pin_b.value()
+            
+            # Optimized quadrature decoding
+            if current_a == current_b:
+                self.count += 1  # Clockwise
+            else:
+                self.count -= 1  # Counter-clockwise
+            
+            self.last_a = current_a
+    
+    def get_count(self):
+        """Get current encoder count (raw pulses)"""
+        return self.count
+    
+    def zero(self):
+        """Zero the encoder at current position"""
+        self.count = 0
+    
+    def __repr__(self):
+        return f"Encoder: {self.get_count()} counts"
 
-# Command handler functions
-def handle_led(args):
-    """Handle LED command: LED:0 or LED:1"""
-    if len(args) != 1:
-        return False
+def set_motor(value):
+    """
+    Set motor speed and direction using 3-pin system: ENA (PWM), IN1, IN2.
+    value: float from -1 (full reverse) to 1 (full forward)
+    """
+    value = max(-1, min(1, value))  # Clamp value
+    duty = int(abs(value) * 1023)
     
-    try:
-        state = int(args[0])
-        if state == 0:
-            led.off()
-        elif state == 1:
-            led.on()
-        else:
-            return False
-    except ValueError:
-        return False
-    
-    return True
-
-# Command dispatch table - maps command names to handler functions
-command_handlers = {
-    "LED": handle_led,
-    # Add more commands here as needed
-    # "SERVO": handle_servo,
-    # "SENSOR": handle_sensor,
-}
-
-# Initialize Bluetooth
-if bt_serial.init_bluetooth("ESP32-MAIN", "1234"):
-    pass  # Silent success like Arduino
-else:
-    bt_serial.println("ERR")
-
-bt_serial.println("Ready")
-
-def parse_cmd(input_str):
-    """Parse command string into function and arguments"""
-    result = {"function": "", "args": [], "valid": False}
-    
-    input_str = input_str.strip()
-    if not input_str:
-        return result
-    
-    colon_index = input_str.find(':')
-    
-    if colon_index < 0:
-        # No colon found - argumentless command
-        result["function"] = input_str.upper()
-        result["valid"] = True
-        return result
-    
-    if colon_index == 0:
-        return result  # Can't start with colon
-    
-    result["function"] = input_str[:colon_index].upper()
-    
-    arg_string = input_str[colon_index + 1:]
-    if not arg_string:
-        # Colon but no arguments - still valid
-        result["valid"] = True
-        return result
-    
-    # Split arguments by comma
-    args = [arg.strip() for arg in arg_string.split(',') if arg.strip()]
-    result["args"] = args
-    result["valid"] = True
-    return result
-
-def run_cmd(command_str):
-    """Execute a parsed command string using dispatch table"""
-    cmd = parse_cmd(command_str)
-    
-    if not cmd["valid"]:
-        bt_serial.println("ERR")
-        return False
-    
-    function = cmd["function"]
-    args = cmd["args"]
-    
-    # Look up command handler in dispatch table
-    if function in command_handlers:
-        try:
-            return command_handlers[function](args)
-        except Exception as e:
-            bt_serial.println("ERR")
-            return False
+    if value > 0:
+        # Forward direction
+        IN1.on()
+        IN2.off()
+        ENA.duty(duty)
+    elif value < 0:
+        # Reverse direction
+        IN1.off()
+        IN2.on()
+        ENA.duty(duty)
     else:
-        bt_serial.println("ERR")
-        return False
+        # Stop
+        IN1.off()
+        IN2.off()
+        ENA.duty(0)
 
-def run_cmd_loop():
-    """Main command processing loop - can be stopped to return to REPL"""
-    bt_serial.println("Command loop started - Ctrl+C to stop and return to REPL")
-    
-    while True:
-        try:
-            # Check for incoming data
-            if bt_serial.available():
-                # Read complete lines from Bluetooth
-                line = bt_serial.read_line()
-                if line:  # read_line() returns None if no complete line ready
-                    if not run_cmd(line):
-                        bt_serial.println("ERR")
-            
-            # Small delay to prevent excessive CPU usage
-            time.sleep(0.01)
-            
-        except KeyboardInterrupt:
-            bt_serial.println("Command loop stopped - REPL available")
-            break
-        except Exception as e:
-            time.sleep(1)
+# Initialize servo motors and joints
+servo_a = ServoMotor(18)  # GPIO18 - excellent PWM pin for servos
+servo_b = ServoMotor(19, scale=-1.0)  # GPIO19 - excellent PWM pin for servos  
+shoulder = Joint(servo_a)
+elbow = Joint(servo_b)
+arm = Arm2D(shoulder, elbow)
 
-# Auto-start the command loop
-run_cmd_loop()
+# Motor control pins (3-pin system: ENA as PWM, IN1/IN2 as digital)
+# Option 1: Grouped pins on one side (recommended)
+ENA = PWM(Pin(25), freq=32)
+IN1 = Pin(26, Pin.OUT)
+IN2 = Pin(27, Pin.OUT)
+
+# Motor encoder pins (2-channel quadrature encoder)
+encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
+print(f"Encoder initialized: {encoder}")
+

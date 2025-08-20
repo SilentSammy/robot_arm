@@ -4,7 +4,11 @@ import time
 import math
 
 class ServoMotor:
-    def __init__(self, pin, scale=1.0, offset=0):
+    # Class field for save granularity (degrees)
+    SAVE_GRANULARITY = 10
+    ANGLES_FILE = "servo_angles.csv"
+    
+    def __init__(self, pin, scale=1.0, offset=0, start_angle=0):
         self.pwm = PWM(Pin(pin), freq=50)
         # Standard servo PWM values for ESP32 hardware PWM
         self.min_us = 600  # pulse width for 0 degrees
@@ -12,8 +16,72 @@ class ServoMotor:
         self.us_per_duty = 20000 / 1023  # 20ms period, 1023 max duty cycle
         # Remove the ESP8266 factor correction - ESP32 doesn't need it
         
+        self.pin = pin
         self.scale = scale
         self.offset = offset
+        self.last_saved_angle = None  # Track last saved angle (rounded to granularity)
+        
+        # Load saved angle or use start_angle
+        saved_angle = self._load_saved_angle()
+        initial_angle = saved_angle if saved_angle is not None else start_angle
+        
+        # Initialize to loaded/start angle and move servo there immediately
+        self.current_angle = initial_angle
+        self.write(initial_angle)
+    
+    def _load_saved_angle(self):
+        """Load saved angle for this servo from CSV file"""
+        try:
+            with open(self.ANGLES_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split(',')
+                        if len(parts) == 2:
+                            pin_str, angle_str = parts
+                            if int(pin_str.strip()) == self.pin:
+                                return float(angle_str.strip())
+        except:
+            # File doesn't exist, malformed, or any other error - return None
+            pass
+        return None
+    
+    def _save_angle(self, angle):
+        """Save current angle to CSV file if granularity threshold is crossed"""
+        # Check if we should save (rounded to granularity)
+        current_rounded = round(angle / self.SAVE_GRANULARITY) * self.SAVE_GRANULARITY
+        if self.last_saved_angle == current_rounded:
+            return  # No need to save, same granularity boundary
+            
+        # Load existing angles
+        angles = {}
+        try:
+            with open(self.ANGLES_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split(',')
+                        if len(parts) == 2:
+                            pin_str, angle_str = parts
+                            angles[int(pin_str.strip())] = float(angle_str.strip())
+        except:
+            # File doesn't exist or error - start with empty dict
+            pass
+        
+        # Update this servo's angle
+        angles[self.pin] = angle
+        
+        # Write back to file
+        try:
+            with open(self.ANGLES_FILE, 'w') as f:
+                f.write("# Servo angles: pin, angle\n")
+                for pin in sorted(angles.keys()):
+                    f.write(f"{pin},{angles[pin]}\n")
+            # Only update last_saved_angle if file write was successful
+            self.last_saved_angle = current_rounded
+        except:
+            # Failed to save - continue without crashing
+            pass
     
     def _write(self, angle):
         """
@@ -32,6 +100,10 @@ class ServoMotor:
     def write(self, user_angle):
         converted_angle = self.convert_angle(user_angle)
         self._write(converted_angle)
+        self.current_angle = user_angle  # Track the actual user angle written
+        
+        # Always attempt to save - _save_angle will handle granularity check
+        self._save_angle(user_angle)
 
     def convert_angle(self, user_angle):
         transformed_angle = (user_angle * self.scale) + self.offset
@@ -56,14 +128,15 @@ class ServoMotor:
 class Joint:
     def __init__(self, servo):
         self.servo = servo
-        self.target = servo.revert_angle(90)  # Default target angle
-        self.current_angle = self.target
+        self.target = servo.current_angle  # Initial target (will be reset on enable)
         self.speed = 0
         self.last_update = None
         self.tmr = None
 
     def enable(self):
         if self.tmr is None:
+            # SAFETY: Always reset target to current position to prevent sudden jumps
+            self.target = self.servo.current_angle
             self.tmr = machine.Timer(0)
             self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
 
@@ -75,7 +148,12 @@ class Joint:
 
     def write(self, angle):
         self.servo.write(angle)
-        self.current_angle = angle
+        # No need to track current_angle here - ServoMotor handles it
+
+    @property
+    def current_angle(self):
+        """Get current angle from the servo motor"""
+        return self.servo.current_angle
 
     def update(self):
         # Calculate time since last update
@@ -114,7 +192,7 @@ class Joint:
         self.target += increment
         self.speed = speed  # Set speed for movement
     
-    def set_angular_vel(self, avel):
+    def set_vel(self, avel):
         self.speed = abs(avel)  # Use magnitude for speed
         self.target = self.servo.max_user_angle if avel >= 0 else self.servo.min_user_angle  # Direction determines target
 
@@ -180,6 +258,8 @@ class Arm2D:
         Start periodic updates to move arm towards target position.
         """
         if self.tmr is None:
+            # SAFETY: Always reset target to current position to prevent sudden jumps
+            self.target = self.FK()  # Recalculate from current joint angles
             self.tmr = machine.Timer(0)
             self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
             
@@ -261,7 +341,7 @@ class Arm2D:
         self.target = (current_x + dx, current_y + dy)
         self.speed = speed
     
-    def set_cartesian_vel(self, vx, vy):
+    def set_vels(self, vx, vy):
         """Set cartesian velocity - arm moves continuously in direction of velocity vector"""
         self.speed = math.sqrt(vx*vx + vy*vy)  # Magnitude of velocity
         if self.speed > 0:
