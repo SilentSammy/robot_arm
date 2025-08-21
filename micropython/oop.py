@@ -3,6 +3,101 @@ from machine import Pin, PWM
 import time
 import math
 
+class Encoder:
+    def __init__(self, pin_a, pin_b):
+        """
+        Software quadrature encoder using interrupt-based counting.
+        pin_a: Channel A pin (main pulse signal)
+        pin_b: Channel B pin (for direction detection)
+        """
+        self.pin_a = Pin(pin_a, Pin.IN, Pin.PULL_UP)
+        self.pin_b = Pin(pin_b, Pin.IN, Pin.PULL_UP)
+        self.count = 0
+        self.last_a = self.pin_a.value()
+        
+        # Set up interrupt on pin A (rising and falling edges)
+        self.pin_a.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self._irq_handler)
+    
+    def _irq_handler(self, pin):
+        """Interrupt handler for encoder pin A changes - optimized for speed"""
+        # Read both pins once to avoid multiple GPIO reads
+        current_a = self.pin_a.value()
+        
+        # Only process if A actually changed (debounce noise)
+        if self.last_a != current_a:
+            current_b = self.pin_b.value()
+            
+            # Optimized quadrature decoding
+            if current_a == current_b:
+                self.count += 1  # Clockwise
+            else:
+                self.count -= 1  # Counter-clockwise
+            
+            self.last_a = current_a
+    
+    def get_count(self):
+        """Get current encoder count (raw pulses)"""
+        return self.count
+    
+    def zero(self):
+        """Zero the encoder at current position"""
+        self.count = 0
+    
+    def __repr__(self):
+        return f"Encoder: {self.get_count()} counts"
+
+class DCMotor:
+    def __init__(self, ena_pin, in1_pin, in2_pin, freq=32):
+        """
+        DC Motor control using 3-pin system: ENA (PWM), IN1, IN2.
+        ena_pin: PWM pin for speed control
+        in1_pin: Digital pin for direction control 1
+        in2_pin: Digital pin for direction control 2
+        freq: PWM frequency (default 32Hz)
+        """
+        self.ena = PWM(Pin(ena_pin), freq=freq)
+        self.in1 = Pin(in1_pin, Pin.OUT)
+        self.in2 = Pin(in2_pin, Pin.OUT)
+        
+        # Initialize to stopped state
+        self.set_power(0)
+    
+    def set_power(self, value):
+        """
+        Set motor speed and direction.
+        value: float from -1 (full reverse) to 1 (full forward)
+        """
+        value = max(-1, min(1, value))  # Clamp value
+        duty = int(abs(value) * 1023)
+        
+        if value > 0:
+            # Forward direction
+            self.in1.on()
+            self.in2.off()
+            self.ena.duty(duty)
+        elif value < 0:
+            # Reverse direction
+            self.in1.off()
+            self.in2.on()
+            self.ena.duty(duty)
+        else:
+            # Stop
+            self.in1.off()
+            self.in2.off()
+            self.ena.duty(0)
+    
+    def stop(self):
+        """Stop the motor"""
+        self.set_power(0)
+    
+    def forward(self, power=1.0):
+        """Move forward at specified power (0-1)"""
+        self.set_power(abs(power))
+    
+    def reverse(self, power=1.0):
+        """Move reverse at specified power (0-1)"""
+        self.set_power(-abs(power))
+
 class ServoMotor:
     # Class field for save granularity (degrees)
     SAVE_GRANULARITY = 10
