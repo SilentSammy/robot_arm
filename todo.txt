@@ -1,6 +1,13 @@
-- make ServoMotor class keep track of the written angle, update Joint and Arm2D classes to set their initial targets accordingly.
-- make ServoMotor class periodically save their last written angle to a file, and load it on init (to avoid sudden jumps on startup)
-- add BT commands (arm2D enabled, joints disabled by default)
-- add caster wheel and increase axle height slightly
++ make ServoMotor class keep track of the written angle, update Joint and Arm2D classes to set their initial targets accordingly.
++ make ServoMotor class periodically save their last written angle to a file, and load it on init (to avoid sudden jumps on startup)
++ reflash with standard MP firmware
++ revert back to hardware encoder
++ make arm2D automatically disable if any joint is enabled, and disable all joints if it is enabled to avoid control conflicts.
+- implement web command system
 - add DC motor + encoder controller
--- adress encoder accuracy concerns
+-- figure out why the entire project can't be upped at once from PyMakr (maybe firmware version)?
+
+HARDWARE
+- Make tripod base with 3 caster wheels, 1 infront, 2 behind.
+- increase axle height slightly + reinforce base axle.
+- Electromagnet holder

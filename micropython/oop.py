@@ -6,45 +6,57 @@ import math
 class Encoder:
     def __init__(self, pin_a, pin_b):
         """
-        Software quadrature encoder using interrupt-based counting.
-        pin_a: Channel A pin (main pulse signal)
-        pin_b: Channel B pin (for direction detection)
+        Hardware quadrature encoder using ESP32's PCNT (Pulse Counter) peripheral.
+        Much more accurate and reliable than software-based counting.
+        pin_a: Channel A pin
+        pin_b: Channel B pin  
         """
-        self.pin_a = Pin(pin_a, Pin.IN, Pin.PULL_UP)
-        self.pin_b = Pin(pin_b, Pin.IN, Pin.PULL_UP)
-        self.count = 0
-        self.last_a = self.pin_a.value()
-        
-        # Set up interrupt on pin A (rising and falling edges)
-        self.pin_a.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self._irq_handler)
+        try:
+            # Use ESP32 hardware pulse counter for quadrature encoding
+            from machine import Pin
+            from esp32 import PCNT
+            
+            # Create PCNT unit for quadrature decoding
+            self.pcnt = PCNT(0, pin_a, pin_b, count_mode=PCNT.MODE_QUAD)
+            self.pcnt.value(0)  # Start at zero
+            self.hardware_encoder = True
+            
+        except (ImportError, AttributeError):
+            # Fallback to software implementation if hardware not available
+            self.pin_a = Pin(pin_a, Pin.IN, Pin.PULL_UP)
+            self.pin_b = Pin(pin_b, Pin.IN, Pin.PULL_UP)
+            self.count = 0
+            self.last_a = self.pin_a.value()
+            self.pin_a.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self._irq_handler)
+            self.hardware_encoder = False
     
     def _irq_handler(self, pin):
-        """Interrupt handler for encoder pin A changes - optimized for speed"""
-        # Read both pins once to avoid multiple GPIO reads
+        """Software fallback interrupt handler"""
         current_a = self.pin_a.value()
-        
-        # Only process if A actually changed (debounce noise)
         if self.last_a != current_a:
             current_b = self.pin_b.value()
-            
-            # Optimized quadrature decoding
             if current_a == current_b:
-                self.count += 1  # Clockwise
+                self.count += 1
             else:
-                self.count -= 1  # Counter-clockwise
-            
+                self.count -= 1
             self.last_a = current_a
     
     def get_count(self):
-        """Get current encoder count (raw pulses)"""
-        return self.count
+        """Get current encoder count"""
+        if self.hardware_encoder:
+            return self.pcnt.value()
+        else:
+            return self.count
     
     def zero(self):
         """Zero the encoder at current position"""
-        self.count = 0
+        if self.hardware_encoder:
+            self.pcnt.value(0)
+        else:
+            self.count = 0
     
     def __repr__(self):
-        return f"Encoder: {self.get_count()} counts"
+        return f"Encoder: {self.get_count()} counts ({'HW' if self.hardware_encoder else 'SW'})"
 
 class DCMotor:
     def __init__(self, ena_pin, in1_pin, in2_pin, freq=32):
@@ -104,26 +116,39 @@ class ServoMotor:
     ANGLES_FILE = "servo_angles.csv"
     
     def __init__(self, pin, scale=1.0, offset=0, start_angle=0):
-        self.pwm = PWM(Pin(pin), freq=50)
-        # Standard servo PWM values for ESP32 hardware PWM
-        self.min_us = 600  # pulse width for 0 degrees
-        self.max_us = 2500  # pulse width for 180 degrees
-        self.us_per_duty = 20000 / 1023  # 20ms period, 1023 max duty cycle
-        # Remove the ESP8266 factor correction - ESP32 doesn't need it
-        
+        # Store configuration first so _load_saved_angle can work
         self.pin = pin
         self.scale = scale
         self.offset = offset
-        self.last_saved_angle = None  # Track last saved angle (rounded to granularity)
         
         # Load saved angle or use start_angle
         saved_angle = self._load_saved_angle()
         initial_angle = saved_angle if saved_angle is not None else start_angle
         
-        # Initialize to loaded/start angle and move servo there immediately
+        # Calculate the target servo angle and duty cycle before creating PWM
+        target_servo_angle = (initial_angle * scale) + offset
+        target_servo_angle = max(0, min(180, target_servo_angle))  # Clamp
+        
+        # Calculate target duty cycle
+        min_us = 600
+        max_us = 2500
+        us_per_duty = 20000 / 1023
+        min_duty = int(min_us / us_per_duty)
+        max_duty = int(max_us / us_per_duty)
+        target_duty = int(min_duty + (max_duty - min_duty) * target_servo_angle / 180)
+        
+        # Create PWM and immediately set to target duty to prevent glitches
+        self.pwm = PWM(Pin(pin), freq=50, duty=target_duty)
+        
+        # Store PWM configuration
+        self.min_us = min_us
+        self.max_us = max_us
+        self.us_per_duty = us_per_duty
+        self.last_saved_angle = None
+        
+        # Initialize current_angle
         self.current_angle = initial_angle
-        self.write(initial_angle)
-    
+
     def _load_saved_angle(self):
         """Load saved angle for this servo from CSV file"""
         try:
@@ -228,15 +253,20 @@ class Joint:
         self.last_update = None
         self.tmr = None
 
+    @property
+    def enabled(self):
+        """Check if joint control is enabled"""
+        return self.tmr is not None
+
     def enable(self):
-        if self.tmr is None:
+        if not self.enabled:
             # SAFETY: Always reset target to current position to prevent sudden jumps
             self.target = self.servo.current_angle
-            self.tmr = machine.Timer(0)
+            self.tmr = machine.Timer(0)  # Use Timer 0 for all joints
             self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
 
     def disable(self):
-        if self.tmr is not None:
+        if self.enabled:
             self.tmr.deinit()
             self.tmr = None
             self.last_update = None
@@ -303,6 +333,11 @@ class Arm2D:
         self.last_update = None
         self.tmr = None
 
+    @property
+    def enabled(self):
+        """Check if arm control is enabled"""
+        return self.tmr is not None
+
     def FK(self):
         """
         Returns (x, y) position of the end effector using forward kinematics.
@@ -352,17 +387,23 @@ class Arm2D:
         """
         Start periodic updates to move arm towards target position.
         """
-        if self.tmr is None:
+        if not self.enabled:
+            # SAFETY: Disable individual joints to avoid control conflicts
+            if self.shoulder.enabled:
+                self.shoulder.disable()
+            if self.elbow.enabled:
+                self.elbow.disable()
+                
             # SAFETY: Always reset target to current position to prevent sudden jumps
             self.target = self.FK()  # Recalculate from current joint angles
-            self.tmr = machine.Timer(0)
+            self.tmr = machine.Timer(1)  # Use Timer 1 for Arm2D
             self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
             
     def disable(self):
         """
         Stop periodic updates.
         """
-        if self.tmr is not None:
+        if self.enabled:
             self.tmr.deinit()
             self.tmr = None
             self.last_update = None
@@ -371,6 +412,11 @@ class Arm2D:
         """
         Update arm position based on current target and speed.
         """
+        # SAFETY: Auto-disable if any joint is enabled to avoid control conflicts
+        if self.shoulder.enabled or self.elbow.enabled:
+            self.disable()
+            return
+            
         # Calculate time since last update
         now = time.ticks_ms()
         if self.last_update is None:
