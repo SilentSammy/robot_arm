@@ -47,6 +47,17 @@ def connect_wifi(wait=True):
         else:
             print("Failed to connect to", ssid)
 
+def stop_webserver():
+    """Stop the web server and clean up the socket"""
+    global server_socket
+    if server_socket:
+        try:
+            server_socket.close()
+            print("Web server stopped")
+        except:
+            pass
+        server_socket = None
+
 def start_webserver(endpoints):
     def handle_client(client_socket):
         # Set a timeout so we don't block indefinitely
@@ -91,18 +102,36 @@ def start_webserver(endpoints):
         client_socket.close()
 
     global server_socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(('', 80))
-    server_socket.listen(5)
-    print("Web server started")
-    while True:
-        try:
-            client_socket, addr = server_socket.accept()
-            print("Client connected from", addr)
-            handle_client(client_socket)
-        except Exception as e:
-            print("Error accepting connection:", e)
+    
+    # Clean up any existing socket first
+    stop_webserver()
+    
+    # Create new socket with proper error handling
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind(('', 80))
+        server_socket.listen(5)
+        print("Web server started")
+        
+        while True:
+            try:
+                client_socket, addr = server_socket.accept()
+                print("Client connected from", addr)
+                handle_client(client_socket)
+            except KeyboardInterrupt:
+                print("\nKeyboard interrupt - stopping web server")
+                stop_webserver()
+                break
+            except Exception as e:
+                print("Error accepting connection:", e)
+                
+    except OSError as e:
+        if e.args[0] == 112:  # EADDRINUSE
+            print("Port 80 is busy. Try: web.stop_webserver() then restart")
+        else:
+            print(f"Socket error: {e}")
+        stop_webserver()
 
 def parse_http_request(http_request):
     # Split request into headers and body

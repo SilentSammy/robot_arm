@@ -3,9 +3,10 @@
 + reflash with standard MP firmware
 + revert back to hardware encoder
 + make arm2D automatically disable if any joint is enabled, and disable all joints if it is enabled to avoid control conflicts.
-- implement web command system
++ split oop into more organized files
++ implement web command system
++ figure out why the entire project can't be upped at once from PyMakr (maybe firmware version)?
 - add DC motor + encoder controller
--- figure out why the entire project can't be upped at once from PyMakr (maybe firmware version)?
 
 HARDWARE
 - Make tripod base with 3 caster wheels, 1 infront, 2 behind.
