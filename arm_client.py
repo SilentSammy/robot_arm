@@ -7,7 +7,7 @@ class ArmClient:
         self.prev_x = None  
         self.prev_y = None
         
-    def send(self, w=None, x=None, y=None, force=False):
+    def send_vels(self, w=None, x=None, y=None, force=False):
         """
         Send control commands to the robot arm.
         
@@ -18,7 +18,7 @@ class ArmClient:
             force: Skip duplicate checking, always send
             
         Returns:
-            JSON response from the robot, or None on error
+            None (fire-and-forget)
         """
         # Check if any values have changed (unless forced)
         if not force and w == self.prev_w and x == self.prev_x and y == self.prev_y:
@@ -35,35 +35,55 @@ class ArmClient:
         if y is not None:
             params["y"] = y
             self.prev_y = y
-            
-        # Send request
-        try:
-            response = requests.get(f"{self.base_url}/control", params=params)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"HTTP Error {response.status_code}: {response.text}")
-                return None
-        except Exception as ex:
-            print(f"Error sending command: {ex}")
-            return None
+        
+        # Fire-and-forget request in a background thread
+        import threading
+        def _send_request():
+            try:
+                requests.get(f"{self.base_url}/control", params=params, timeout=1)
+            except Exception:
+                pass  # Ignore errors
+        threading.Thread(target=_send_request, daemon=True).start()
+        return None
     
+    def set_magnet(self, state=None):
+        """
+        Control the electromagnet. If state is None, toggles. Accepts True/False, 'on'/'off', 1/0, or 'toggle'.
+        Returns the new state ('on' or 'off') or None on error.
+        """
+        import threading
+        def _set():
+            try:
+                params = {}
+                if state is not None:
+                    if isinstance(state, bool):
+                        params['state'] = 'on' if state else 'off'
+                    elif isinstance(state, (int, float)):
+                        params['state'] = 'on' if state else 'off'
+                r = requests.get(f"{self.base_url}/magnet", params=params, timeout=1)
+                if r.status_code == 200:
+                    return r.json().get('magnet')
+            except Exception:
+                pass
+            return None
+        t = threading.Thread(target=_set, daemon=True)
+        t.start()
+        return None
+
     def stop_all(self):
         """Emergency stop - set all motors and velocities to zero"""
-        return self.send(w=0, x=0, y=0)
+        return self.send_vels(w=0, x=0, y=0)
     
     def toggle_led(self):
-        """Toggle the onboard LED for connectivity testing"""
-        try:
-            response = requests.get(f"{self.base_url}/toggle")
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"HTTP Error {response.status_code}: {response.text}")
-                return None
-        except Exception as ex:
-            print(f"Error toggling LED: {ex}")
-            return None
+        """Toggle the onboard LED for connectivity testing (fire-and-forget)"""
+        import threading
+        def _toggle():
+            try:
+                requests.get(f"{self.base_url}/toggle", timeout=1)
+            except Exception:
+                pass
+        threading.Thread(target=_toggle, daemon=True).start()
+        return None
 
 # Example usage:
 if __name__ == "__main__":
@@ -71,11 +91,11 @@ if __name__ == "__main__":
     pass # break here for debug console
 
     import time
-    from input_manager.input_man import is_pressed
+    from input_manager.input_man import is_pressed, rising_edge
 
-    w_mag = 0.15
+    w_mag = 0.2
     xy_mag = 20.0
-    slow_w_mag = 0.1
+    slow_w_mag = 0.12
     slow_xy_mag = 7
     print("Controls: q/e=platform left/right, w/s=arm up/down, a/d=arm left/right, x=exit")
     print("Hold keys for continuous movement. Press x to exit.")
@@ -95,9 +115,17 @@ if __name__ == "__main__":
             if is_pressed('i') or is_pressed('k'):
                 y = (int(is_pressed('i')) - int(is_pressed('k'))) * slow_xy_mag
 
+            # Magnet controls using rising_edge
+            if rising_edge('m'):
+                arm.set_magnet()
+            if rising_edge('n'):
+                arm.set_magnet(True)
+            if rising_edge('b'):
+                arm.set_magnet(False)
+
             if is_pressed('x'):
                 break
-            arm.send(w=w, x=x, y=y)
+            arm.send_vels(w=w, x=x, y=y)
             print(f"\r[w={w:.2f} x={x:.2f} y={y:.2f}] > ", end="", flush=True)
     except KeyboardInterrupt:
         print("\nExiting...")

@@ -218,23 +218,33 @@ class Arm2D:
             self.speed = 0
 
     # Cartesian control methods similar to Joint class
-    def snap_to(self, x, y):
-        """Snap arm to (x,y) position immediately"""
+    def snap_to(self, x=None, y=None):
+        """Snap arm to (x,y) position immediately. If x or y is None, use current value."""
+        current_x, current_y = self.target
+        if x is None:
+            x = current_x
+        if y is None:
+            y = current_y
         self.target = (x, y)
         self.speed = float('inf')
-    
-    def snap_by(self, dx, dy):
+
+    def snap_by(self, dx=0, dy=0):
         """Snap arm by relative offset immediately"""
         current_x, current_y = self.target
         self.target = (current_x + dx, current_y + dy)
         self.speed = float('inf')
-    
-    def move_to(self, x, y, speed):
-        """Move arm to (x,y) position at specified speed"""
+
+    def move_to(self, x=None, y=None, speed=10):
+        """Move arm to (x,y) position at specified speed. If x or y is None, use current value."""
+        current_x, current_y = self.target
+        if x is None:
+            x = current_x
+        if y is None:
+            y = current_y
         self.target = (x, y)
         self.speed = speed
     
-    def move_by(self, dx, dy, speed):
+    def move_by(self, dx=0, dy=0, speed=10):
         """Move arm by relative offset at specified speed"""
         current_x, current_y = self.target
         self.target = (current_x + dx, current_y + dy)

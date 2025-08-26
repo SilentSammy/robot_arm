@@ -6,9 +6,14 @@
 + split oop into more organized files
 + implement web command system
 + figure out why the entire project can't be upped at once from PyMakr (maybe firmware version)?
+- add electromagnet http endpoint
+- add other control mode enpoints
 - add DC motor + encoder controller
+- add arm exlusion zones to protect servos
+- figure out what's causing those servo jumps
 
 HARDWARE
++ Electromagnet holder
 - Make tripod base with 3 caster wheels, 1 infront, 2 behind.
-- increase axle height slightly + reinforce base axle.
-- Electromagnet holder
+- decrease axle height slightly + reinforce base axle.
+- more surface area for breadboard support + ziptie holes

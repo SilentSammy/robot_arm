@@ -59,7 +59,7 @@ class Encoder:
         return f"Encoder: {self.get_count()} counts ({'HW' if self.hardware_encoder else 'SW'})"
 
 class DCMotor:
-    def __init__(self, ena_pin, in1_pin, in2_pin, freq=32, power_limit=0.2):
+    def __init__(self, ena_pin, in1_pin, in2_pin, freq=24, power_limit=0.25):
         """
         DC Motor control using 3-pin system: ENA (PWM), IN1, IN2.
         ena_pin: PWM pin for speed control
@@ -109,7 +109,7 @@ class DCMotor:
 
 class ServoMotor:
     # Class field for save granularity (degrees)
-    SAVE_GRANULARITY = 10
+    SAVE_GRANULARITY = 20
     ANGLES_FILE = "servo_angles.csv"
     
     def __init__(self, pin, scale=1.0, offset=0, start_angle=0):

@@ -6,7 +6,7 @@ from hardware import ServoMotor, Encoder, DCMotor
 from control import Joint, Arm2D
 import web
 
-# Initialize servo motors and joints
+# Initialize arm (servo motors and joints)
 servo_a = ServoMotor(18)  # GPIO18 - excellent PWM pin for servos
 servo_b = ServoMotor(19, scale=-1.0)  # GPIO19 - excellent PWM pin for servos
 shoulder = Joint(servo_a)
@@ -17,6 +17,9 @@ arm.enable()
 # Initialize platform (DC motor and encoder)
 motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
 encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
+
+# Initialize electromagnet
+mag = Pin(15, Pin.OUT)
 
 # Initialize LED for web demo
 led = Pin(2, Pin.OUT)  # GPIO2 - onboard LED on most ESP32 boards
@@ -86,10 +89,31 @@ def control(request):
     
     return response_data
 
+def magnet_control(request):
+    """Endpoint to control the electromagnet. If no param, toggle. Accepts 'on' or 'off' param."""
+    params = request.get('params', {})
+    action = params.get('state', None)
+    response = {}
+    current = mag.value()
+    if action is None:
+        # Toggle
+        new_state = 0 if current else 1
+    elif str(action).lower() in ('on', '1', 'true'):
+        new_state = 1
+    elif str(action).lower() in ('off', '0', 'false'):
+        new_state = 0
+    else:
+        response['error'] = f"Invalid state: {action}"
+        new_state = current
+    mag.value(new_state)
+    response['magnet'] = 'on' if mag.value() else 'off'
+    return response
+
 # Define web endpoints
 endpoints = {
     "toggle": toggle_led,
     "control": control,
+    "magnet": magnet_control,
 }
 
 # Uncomment the following lines to start web server
