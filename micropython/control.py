@@ -21,7 +21,7 @@ class Joint:
             # SAFETY: Always reset target to current position to prevent sudden jumps
             self.target = self.servo.current_angle
             self.tmr = machine.Timer(0)  # Use Timer 0 for all joints
-            self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
+            self.tmr.init(period=20, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
 
     def disable(self):
         if self.enabled:
@@ -46,6 +46,10 @@ class Joint:
             return
         dt = time.ticks_diff(now, self.last_update) / 1000.0  # Convert to seconds
         self.last_update = now
+        # Clamp dt to prevent large jumps (e.g., timer delay or missed callback)
+        max_dt = 0.1  # 100 ms max step
+        if dt > max_dt:
+            dt = max_dt
 
         # Update servo position based on speed
         dtheta = self.speed * dt
@@ -155,7 +159,7 @@ class Arm2D:
             # SAFETY: Always reset target to current position to prevent sudden jumps
             self.target = self.FK()  # Recalculate from current joint angles
             self.tmr = machine.Timer(1)  # Use Timer 1 for Arm2D
-            self.tmr.init(period=10, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
+            self.tmr.init(period=20, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
             
     def disable(self):
         """
@@ -174,7 +178,7 @@ class Arm2D:
         if self.shoulder.enabled or self.elbow.enabled:
             self.disable()
             return
-            
+
         # Calculate time since last update
         now = time.ticks_ms()
         if self.last_update is None:
@@ -182,33 +186,37 @@ class Arm2D:
             return
         dt = time.ticks_diff(now, self.last_update) / 1000.0  # Convert to seconds
         self.last_update = now
-        
+        # Clamp dt to prevent large jumps (e.g., timer delay or missed callback)
+        max_dt = 0.1  # 100 ms max step
+        if dt > max_dt:
+            dt = max_dt
+
         # Update position based on speed
         current_x, current_y = self.FK()
         target_x, target_y = self.target
-        
+
         # Calculate direction vector to target
         dx_total = target_x - current_x
         dy_total = target_y - current_y
         distance_to_target = math.sqrt(dx_total*dx_total + dy_total*dy_total)
-        
+
         if distance_to_target < 0.01:  # Close enough to target
             return
-            
+
         # Calculate step size based on speed and time
         step_size = self.speed * dt
-        
+
         # Normalize direction and scale by step size
         dx = (dx_total / distance_to_target) * step_size
         dy = (dy_total / distance_to_target) * step_size
-        
+
         # Don't overshoot the target
         if step_size >= distance_to_target:
             next_x, next_y = target_x, target_y
         else:
             next_x = current_x + dx
             next_y = current_y + dy
-            
+
         # Try to move to new position, handle unreachable targets gracefully
         try:
             self.set(next_x, next_y)
@@ -262,3 +270,58 @@ class Arm2D:
         else:
             # Zero velocity - stop at current position
             self.target = self.FK()
+
+class EncodedMotor:
+    def __init__(self, motor, encoder, max_power=0.25):
+        self.motor = motor
+        self.encoder = encoder
+        self.target = encoder.get_count()
+        self.tmr = None
+        self.last_update = None
+        self.max_power = max_power
+
+    @property
+    def enabled(self):
+        return self.tmr is not None
+
+    def enable(self):
+        if not self.enabled:
+            self.target = self.encoder.get_count()  # Reset target to current position
+            self.tmr = machine.Timer(2)  # Use a virtual timer (or pick a unique number)
+            self.tmr.init(period=20, mode=machine.Timer.PERIODIC, callback=lambda t: self.update())
+
+    def disable(self):
+        if self.enabled:
+            self.tmr.deinit()
+            self.tmr = None
+            self.last_update = None
+
+    def update(self):
+        # Simple PD control to reach target encoder count
+        now = time.ticks_ms()
+        if self.last_update is None:
+            self.last_update = now
+            return
+        dt = time.ticks_diff(now, self.last_update) / 1000.0
+        self.last_update = now
+        max_dt = 0.1
+        if dt > max_dt:
+            dt = max_dt
+
+        # PD control
+        kP = 0.02  # Proportional gain (tune as needed)
+        kD = 0.001  # Derivative gain (tune as needed)
+        pos = self.encoder.get_count()
+        error = self.target - pos
+        d_error = 0
+        if not hasattr(self, '_last_error'):
+            self._last_error = error
+        else:
+            d_error = (error - self._last_error) / dt if dt > 0 else 0
+            self._last_error = error
+        power = kP * error + kD * d_error
+        # Clamp power to [-max_power, max_power]
+        maxp = abs(self.max_power)
+        power = max(-maxp, min(maxp, power))
+        self.motor.set_power(power)
+    

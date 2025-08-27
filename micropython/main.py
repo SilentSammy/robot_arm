@@ -3,7 +3,7 @@ from machine import Pin, PWM
 import time
 import math
 from hardware import ServoMotor, Encoder, DCMotor
-from control import Joint, Arm2D
+from control import Joint, Arm2D, EncodedMotor
 import web
 
 # Initialize arm (servo motors and joints)
@@ -17,6 +17,7 @@ arm.enable()
 # Initialize platform (DC motor and encoder)
 motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
 encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
+enmtr = EncodedMotor(motor, encoder)
 
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
@@ -39,29 +40,25 @@ def toggle_led(request):
         "message": f"LED turned {'on' if led_state else 'off'}"
     }
 
-def control(request):
-    """Control endpoint for motor power and arm velocities"""
+def set_vels(request):
+    """Set velocities endpoint for motor power and arm velocities"""
     global current_vx, current_vy
-    
     params = request.get('params', {})
-    print(f"Control request: {params}")  # Debug: show incoming parameters
+    print(f"ctrl_vels request: {params}")  # Debug: show incoming parameters
     response_data = {}
-    
     # Handle motor power (w parameter)
     if 'w' in params:
         try:
             motor_power = float(params['w'])
             motor_power = max(-1.0, min(1.0, motor_power))  # Clamp to [-1, 1]
             print(f"Setting motor power: {motor_power}")  # Debug: motor control
-            motor.set_power(motor_power)  # TODO: Uncomment for testing
+            motor.set_power(motor_power)
             response_data['motor_power'] = motor_power
         except ValueError:
             response_data['motor_error'] = "Invalid motor power value"
-    
     # Handle arm velocities (x and y parameters)
     vx_updated = False
     vy_updated = False
-    
     if 'x' in params:
         try:
             current_vx = float(params['x'])
@@ -69,7 +66,6 @@ def control(request):
             response_data['vx'] = current_vx
         except ValueError:
             response_data['vx_error'] = "Invalid x velocity value"
-    
     if 'y' in params:
         try:
             current_vy = float(params['y'])
@@ -77,17 +73,28 @@ def control(request):
             response_data['vy'] = current_vy
         except ValueError:
             response_data['vy_error'] = "Invalid y velocity value"
-    
     # Set arm velocities if either x or y was updated
     if vx_updated or vy_updated:
         print(f"Setting arm velocities: vx={current_vx}, vy={current_vy}")  # Debug: arm control
-        arm.set_vels(current_vx, current_vy)  # TODO: Uncomment for testing
+        arm.set_vels(current_vx, current_vy)
         response_data['arm_vels'] = [current_vx, current_vy]
-    
     # Add current state to response
     response_data['status'] = 'ok'
-    
     return response_data
+
+def delta_pos(request):
+    """Endpoint for incremental (delta) position control using Arm2D.move_by(dx, dy)"""
+    params = request.get('params', {})
+    dx = params.get('dx', 0)
+    dy = params.get('dy', 0)
+    try:
+        dx = int(float(dx))
+        dy = int(float(dy))
+    except ValueError:
+        return {'error': 'Invalid dx or dy value'}
+    print(f"delta_pos request: dx={dx}, dy={dy}")
+    arm.move_by(dx, dy)
+    return {'status': 'ok', 'dx': dx, 'dy': dy}
 
 def magnet_control(request):
     """Endpoint to control the electromagnet. If no param, toggle. Accepts 'on' or 'off' param."""
@@ -112,7 +119,8 @@ def magnet_control(request):
 # Define web endpoints
 endpoints = {
     "toggle": toggle_led,
-    "control": control,
+    "set_vels": set_vels,
+    "delta_pos": delta_pos,
     "magnet": magnet_control,
 }
 
