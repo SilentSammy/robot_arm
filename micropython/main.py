@@ -3,7 +3,8 @@ from machine import Pin, PWM
 import time
 import math
 from hardware import ServoMotor, Encoder, DCMotor
-from control import Joint, Arm2D, EncodedMotor
+from control import Joint, Arm2D
+from encoded_motor import EncodedMotor
 import web
 
 # Initialize arm (servo motors and joints)
@@ -18,6 +19,7 @@ arm.enable()
 motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
 encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
 enmtr = EncodedMotor(motor, encoder)
+enmtr.enable()
 
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
