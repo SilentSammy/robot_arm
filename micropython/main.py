@@ -5,7 +5,7 @@ import math
 from hardware import ServoMotor, Encoder, DCMotor
 from servo_kin import Joint, Arm2D
 from motor_kin import EncodedMotor
-import web
+import tcp_server
 
 # Initialize arm (servo motors and joints)
 servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
@@ -24,7 +24,7 @@ platform.enable()
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
 
-# Initialize LED for web demo
+# Initialize LED for TCP demo
 led = Pin(2, Pin.OUT)  # GPIO2 - onboard LED on most ESP32 boards
 led_state = False
 
@@ -36,15 +36,26 @@ def plat_stats():
     print(platform._current_target_counts)
     print(platform.encoder.get_count())
 
-def toggle_led(request):
-    """Toggle LED endpoint for web interface testing"""
+# TCP command: LED:ON, LED:OFF, LED:TOGGLE
+def led_command(args):
     global led_state
-    led_state = not led_state
-    led.value(led_state)
-    return {
-        "led_state": "on" if led_state else "off",
-        "message": f"LED turned {'on' if led_state else 'off'}"
-    }
+    if not args:
+        return 'ERR: No argument (use ON, OFF, or TOGGLE)'
+    action = args[0].strip().upper()
+    if action == 'ON':
+        led_state = True
+        led.value(1)
+        return 'LED ON'
+    elif action == 'OFF':
+        led_state = False
+        led.value(0)
+        return 'LED OFF'
+    elif action == 'TOGGLE':
+        led_state = not led_state
+        led.value(led_state)
+        return 'LED TOGGLED: ' + ('ON' if led_state else 'OFF')
+    else:
+        return 'ERR: Unknown LED action'
 
 def set_vels(request):
     """Set velocities endpoint for motor power and arm velocities"""
@@ -134,15 +145,20 @@ def magnet_control(request):
     response['magnet'] = 'on' if mag.value() else 'off'
     return response
 
-# Define web endpoints
-endpoints = {
-    "toggle": toggle_led,
-    "set_vels": set_vels,
-    "delta_pos": delta_pos,
-    "magnet": magnet_control,
+def platform_spin(request):
+    platform.set_vel(100)  # Example: set platform to spin at 100 counts/sec
+
+def platform_stop(request):
+    platform.set_vel(0)  # Stop the platform
+
+# Define TCP command map
+command_map = {
+    'LED': led_command,
+    # Add more commands here as needed
 }
 
-# Uncomment the following lines to start web server
-web.connect_wifi()
-print("Starting web server...")
-web.start_webserver(endpoints)
+if __name__ == "__main__":
+    # Connect to WiFi using wifi.txt (if needed)
+    tcp_server.connect_to_wifi_from_file("wifi.txt")
+    print("Starting TCP server...")
+    tcp_server.start_tcp_server(command_map, port=12345, led=led)
