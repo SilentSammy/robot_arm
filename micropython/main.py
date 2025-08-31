@@ -3,13 +3,13 @@ from machine import Pin, PWM
 import time
 import math
 from hardware import ServoMotor, Encoder, DCMotor
-from control import Joint, Arm2D
-from encoded_motor import EncodedMotor
+from servo_kin import Joint, Arm2D
+from motor_kin import EncodedMotor
 import web
 
 # Initialize arm (servo motors and joints)
-servo_a = ServoMotor(18)  # GPIO18 - excellent PWM pin for servos
-servo_b = ServoMotor(19, scale=-1.0)  # GPIO19 - excellent PWM pin for servos
+servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
+servo_b = ServoMotor(19, scale=-1.0, start_angle=-120)  # GPIO19 - excellent PWM pin for servos
 shoulder = Joint(servo_a)
 elbow = Joint(servo_b)
 arm = Arm2D(shoulder, elbow)
@@ -18,8 +18,8 @@ arm.enable()
 # Initialize platform (DC motor and encoder)
 motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
 encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
-enmtr = EncodedMotor(motor, encoder)
-enmtr.enable()
+platform = EncodedMotor(motor, encoder)
+platform.enable()
 
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
@@ -31,6 +31,10 @@ led_state = False
 # Track current arm velocities for partial updates
 current_vx = 0.0
 current_vy = 0.0
+
+def plat_stats():
+    print(platform._current_target_counts)
+    print(platform.encoder.get_count())
 
 def toggle_led(request):
     """Toggle LED endpoint for web interface testing"""
@@ -48,16 +52,18 @@ def set_vels(request):
     params = request.get('params', {})
     print(f"ctrl_vels request: {params}")  # Debug: show incoming parameters
     response_data = {}
-    # Handle motor power (w parameter)
+    # Handle platform velocity (w parameter, in deg/sec)
     if 'w' in params:
         try:
-            motor_power = float(params['w'])
-            motor_power = max(-1.0, min(1.0, motor_power))  # Clamp to [-1, 1]
-            print(f"Setting motor power: {motor_power}")  # Debug: motor control
-            motor.set_power(motor_power)
-            response_data['motor_power'] = motor_power
+            w_deg = float(params['w'])
+            # Convert deg/sec to counts/sec for platform
+            w_counts = platform.degs_to_counts(w_deg)
+            print(f"Setting platform velocity: {w_deg} deg/sec ({w_counts} counts/sec)")
+            platform.set_vel(w_counts)
+            response_data['platform_w_deg'] = w_deg
+            response_data['platform_w_counts'] = w_counts
         except ValueError:
-            response_data['motor_error'] = "Invalid motor power value"
+            response_data['platform_w_error'] = "Invalid w value"
     # Handle arm velocities (x and y parameters)
     vx_updated = False
     vy_updated = False
@@ -89,14 +95,24 @@ def delta_pos(request):
     params = request.get('params', {})
     dx = params.get('dx', 0)
     dy = params.get('dy', 0)
+    dt = params.get('dt', None)
     try:
         dx = int(float(dx))
         dy = int(float(dy))
     except ValueError:
         return {'error': 'Invalid dx or dy value'}
-    print(f"delta_pos request: dx={dx}, dy={dy}")
+    print(f"delta_pos request: dx={dx}, dy={dy}, dt={dt}")
     arm.move_by(dx, dy)
-    return {'status': 'ok', 'dx': dx, 'dy': dy}
+    result = {'status': 'ok', 'dx': dx, 'dy': dy}
+    if dt is not None:
+        try:
+            dt_deg = float(dt)
+            dt_counts = platform.degs_to_counts(dt_deg)
+            platform.snap_by(dt_counts)
+            result['dt'] = dt_deg
+        except ValueError:
+            result['dt_error'] = 'Invalid dt value'
+    return result
 
 def magnet_control(request):
     """Endpoint to control the electromagnet. If no param, toggle. Accepts 'on' or 'off' param."""

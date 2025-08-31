@@ -38,12 +38,13 @@ class ArmClient:
         self._fire_and_forget("set_vels", params)
         return None
 
-    def send_delta_pos(self, dx=0, dy=0):
+    def send_delta_pos(self, dx=0, dy=0, dtheta=0):
         """
         Send incremental (delta) position command to the robot arm via /delta_pos endpoint.
         Resets prev_w, prev_vx, prev_vy to None to avoid stale velocity caching.
+        dtheta is in degrees (for platform rotation).
         """
-        params = {"dx": int(dx), "dy": int(dy)}
+        params = {"dx": int(dx), "dy": int(dy), "dt": float(dtheta)}
         self.prev_w = None
         self.prev_vx = None
         self.prev_vy = None
@@ -77,13 +78,13 @@ class ArmClient:
 
 # Example usage:
 if __name__ == "__main__":
-    arm = ArmClient(base_url="http://192.168.137.51")
+    arm = ArmClient(base_url="http://192.168.137.175")
     pass # break here for debug console
 
     import time
     from input_manager.input_man import is_pressed, rising_edge
 
-    w_mag = 0.12
+    w_mag = 10.0
     xy_mag = 10.0
     print("Controls: q/e=platform left/right, w/s=arm up/down, a/d=arm left/right, x=exit")
     print("Hold keys for continuous movement. Press x to exit.")
@@ -97,11 +98,12 @@ if __name__ == "__main__":
             x = (-int(is_pressed('a')) + int(is_pressed('d'))) * xy_mag * boost
             y = (int(is_pressed('w')) - int(is_pressed('s'))) * xy_mag * boost
 
-            # Delta position control (ijkl, compact)
+            # Delta position control (ijkl, compact) and U/P for dtheta
             dx = (-int(rising_edge('j')) + int(rising_edge('l'))) * boost
             dy = (int(rising_edge('i')) - int(rising_edge('k'))) * boost
-            if dx or dy:
-                arm.send_delta_pos(dx=dx, dy=dy)
+            dtheta = (-int(rising_edge('u')) + int(rising_edge('p'))) * boost
+            if dx or dy or dtheta:
+                arm.send_delta_pos(dx=dx, dy=dy, dtheta=dtheta)
 
             # Magnet controls using rising_edge
             if rising_edge('m'):
@@ -111,8 +113,9 @@ if __name__ == "__main__":
             if rising_edge('b'):
                 arm.set_magnet(False)
 
-            if is_pressed('x'):
-                break
+            # Led control (for debugging)
+            if rising_edge('x'):
+                arm.toggle_led()
             arm.send_vels(w=w, x=x, y=y)
             print(f"\r[w={w:.2f} x={x:.2f} y={y:.2f}] > ", end="", flush=True)
     except KeyboardInterrupt:
