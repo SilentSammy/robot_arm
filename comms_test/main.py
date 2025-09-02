@@ -1,5 +1,5 @@
 import machine
-from tcp_server import start_tcp_server
+import tcp_server as tcp
 
 led = machine.Pin(2, machine.Pin.OUT)
 
@@ -13,8 +13,10 @@ def handle_led(args):
     except Exception as e:
         return f'ERR: {e}'
 
-command_map = {
+tcp.connect_wifi("SammyPC", "12345678")
+tcp.command_map = {
     'LED': handle_led,
 }
 
-start_tcp_server(command_map)
+# To start the TCP server in the background, call from REPL:
+# tcp.start()
