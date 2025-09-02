@@ -18,4 +18,3 @@ command_map = {
 }
 
 start_tcp_server(command_map)
-print("If you see this, it means the code is non-blocking.")

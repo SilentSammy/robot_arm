@@ -9,10 +9,12 @@
 + add electromagnet http endpoint
 + add other control mode enpoints
 + add DC motor + encoder controller
-- add platform speed and pos control endpoint
 - add arm (circular?) exclusion zones to protect servos. but we need to make sure that even if the selected location is valid, the trajectory doesn't cross an exclusion zone.
 - figure out what's causing those servo jumps
-- research BLE for less latency
+- research different protocol for less latency and encoder compatibility
+    - test: get encoder position, start blocking server code, move encoder, stop server, check encoder position again
+    - make multithreaded / non-blocking. run same test but with non-blocking server code
+- add platform speed and pos control endpoint
 
 HARDWARE
 + Electromagnet holder

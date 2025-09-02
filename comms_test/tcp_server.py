@@ -69,18 +69,33 @@ def connect_to_wifi_from_file(config_file="wifi.txt"):
 		password = f.readline().strip()
 	return connect_wifi(ssid, password)
 
-def start_tcp_server(command_map, port=12345, led=None):
+_last_server_socket = None
+
+def stop_tcp_server():
 	"""
-	Starts a TCP server. command_map: dict of command string -> handler(list_of_str_args)
-	Each handler is called as handler(args: list of str). Handler should return a string (response).
-	Optionally pass led=Pin instance for demo/test.
-	Command format: CMD:arg1,arg2,... (whitespace ignored, case-insensitive)
+	Stops the last started TCP server, if any. Closes the socket to free the port.
 	"""
+	global _last_server_socket
+	if _last_server_socket:
+		try:
+			_last_server_socket.close()
+			print('TCP server stopped.')
+		except Exception as e:
+			print('Error stopping TCP server:', e)
+		_last_server_socket = None
+
+def start_tcp_server(command_map, port=12345):
+	"""
+	Starts a TCP server. Attempts to stop any previous server first.
+	"""
+	global _last_server_socket
+	stop_tcp_server()
 	HOST = ''
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	s.bind((HOST, port))
 	s.listen(1)
+	_last_server_socket = s
 	print('TCP server listening on port', port)
 	while True:
 		print('Waiting for connection...')
