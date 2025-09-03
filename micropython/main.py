@@ -5,7 +5,7 @@ import math
 from hardware import ServoMotor, Encoder, DCMotor
 from servo_kin import Joint, Arm2D
 from motor_kin import EncodedMotor
-import tcp_server
+import tcp_server as tcp
 
 # Initialize arm (servo motors and joints)
 servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
@@ -36,129 +36,96 @@ def plat_stats():
     print(platform._current_target_counts)
     print(platform.encoder.get_count())
 
-# TCP command: LED:ON, LED:OFF, LED:TOGGLE
 def led_command(args):
     global led_state
-    if not args:
-        return 'ERR: No argument (use ON, OFF, or TOGGLE)'
-    action = args[0].strip().upper()
-    if action == 'ON':
-        led_state = True
-        led.value(1)
-        return 'LED ON'
-    elif action == 'OFF':
-        led_state = False
-        led.value(0)
-        return 'LED OFF'
-    elif action == 'TOGGLE':
+    # LED: 1 (on), 0 (off), toggle if no arg or arg is None
+    if not args or args[0] is None:
         led_state = not led_state
         led.value(led_state)
-        return 'LED TOGGLED: ' + ('ON' if led_state else 'OFF')
-    else:
-        return 'ERR: Unknown LED action'
-
-def set_vels(request):
-    """Set velocities endpoint for motor power and arm velocities"""
-    global current_vx, current_vy
-    params = request.get('params', {})
-    print(f"ctrl_vels request: {params}")  # Debug: show incoming parameters
-    response_data = {}
-    # Handle platform velocity (w parameter, in deg/sec)
-    if 'w' in params:
-        try:
-            w_deg = float(params['w'])
-            # Convert deg/sec to counts/sec for platform
-            w_counts = platform.degs_to_counts(w_deg)
-            print(f"Setting platform velocity: {w_deg} deg/sec ({w_counts} counts/sec)")
-            platform.set_vel(w_counts)
-            response_data['platform_w_deg'] = w_deg
-            response_data['platform_w_counts'] = w_counts
-        except ValueError:
-            response_data['platform_w_error'] = "Invalid w value"
-    # Handle arm velocities (x and y parameters)
-    vx_updated = False
-    vy_updated = False
-    if 'x' in params:
-        try:
-            current_vx = float(params['x'])
-            vx_updated = True
-            response_data['vx'] = current_vx
-        except ValueError:
-            response_data['vx_error'] = "Invalid x velocity value"
-    if 'y' in params:
-        try:
-            current_vy = float(params['y'])
-            vy_updated = True
-            response_data['vy'] = current_vy
-        except ValueError:
-            response_data['vy_error'] = "Invalid y velocity value"
-    # Set arm velocities if either x or y was updated
-    if vx_updated or vy_updated:
-        print(f"Setting arm velocities: vx={current_vx}, vy={current_vy}")  # Debug: arm control
-        arm.set_vels(current_vx, current_vy)
-        response_data['arm_vels'] = [current_vx, current_vy]
-    # Add current state to response
-    response_data['status'] = 'ok'
-    return response_data
-
-def delta_pos(request):
-    """Endpoint for incremental (delta) position control using Arm2D.move_by(dx, dy)"""
-    params = request.get('params', {})
-    dx = params.get('dx', 0)
-    dy = params.get('dy', 0)
-    dt = params.get('dt', None)
+        return str(int(led_state))
     try:
-        dx = int(float(dx))
-        dy = int(float(dy))
-    except ValueError:
-        return {'error': 'Invalid dx or dy value'}
-    print(f"delta_pos request: dx={dx}, dy={dy}, dt={dt}")
+        val = int(args[0])
+        led_state = bool(val)
+        led.value(led_state)
+        return str(int(led_state))
+    except Exception:
+        return 'ERR'
+
+def vel_command(args):
+    # VEL: vx, vy, w (vx=arm x vel, vy=arm y vel, w=platform deg/s)
+    global current_vx, current_vy
+    try:
+        vx = float(args[0]) if len(args) > 0 and args[0] is not None else None
+        vy = float(args[1]) if len(args) > 1 and args[1] is not None else None
+        w_deg = float(args[2]) if len(args) > 2 and args[2] is not None else None
+    except Exception:
+        return 'ERR'
+    if vx is not None:
+        current_vx = vx
+    if vy is not None:
+        current_vy = vy
+    if (vx is not None) or (vy is not None):
+        arm.set_vels(current_vx, current_vy)
+    if w_deg is not None:
+        w_counts = platform.degs_to_counts(w_deg)
+        platform.set_vel(w_counts)
+    return 'OK'
+
+def dp_command(args):
+    # DP: dx, dy, dt (all optional, just numbers, default 0)
+    try:
+        dx = int(float(args[0])) if len(args) > 0 and args[0] is not None else 0
+        dy = int(float(args[1])) if len(args) > 1 and args[1] is not None else 0
+        dt = float(args[2]) if len(args) > 2 and args[2] is not None else 0
+    except Exception:
+        return 'ERR'
     arm.move_by(dx, dy)
-    result = {'status': 'ok', 'dx': dx, 'dy': dy}
-    if dt is not None:
-        try:
-            dt_deg = float(dt)
-            dt_counts = platform.degs_to_counts(dt_deg)
-            platform.snap_by(dt_counts)
-            result['dt'] = dt_deg
-        except ValueError:
-            result['dt_error'] = 'Invalid dt value'
-    return result
+    dt_counts = platform.degs_to_counts(dt)
+    platform.snap_by(dt_counts)
+    return 'OK'
 
-def magnet_control(request):
-    """Endpoint to control the electromagnet. If no param, toggle. Accepts 'on' or 'off' param."""
-    params = request.get('params', {})
-    action = params.get('state', None)
-    response = {}
+def mag_command(args):
+    # MAG: 1 (on), 0 (off), toggle if no arg or arg is None
     current = mag.value()
-    if action is None:
-        # Toggle
+    if not args or args[0] is None:
         new_state = 0 if current else 1
-    elif str(action).lower() in ('on', '1', 'true'):
-        new_state = 1
-    elif str(action).lower() in ('off', '0', 'false'):
-        new_state = 0
     else:
-        response['error'] = f"Invalid state: {action}"
-        new_state = current
+        try:
+            new_state = 1 if int(args[0]) else 0
+        except Exception:
+            return 'ERR'
     mag.value(new_state)
-    response['magnet'] = 'on' if mag.value() else 'off'
-    return response
+    return str(mag.value())
 
-def platform_spin(request):
-    platform.set_vel(100)  # Example: set platform to spin at 100 counts/sec
+def spin_command(args):
+    # SPIN[:speed] (default 100)
+    speed = 100
+    if args and args[0]:
+        try:
+            speed = int(float(args[0]))
+        except Exception:
+            return 'ERR'
+    platform.set_vel(speed)
+    return 'OK'
 
-def platform_stop(request):
-    platform.set_vel(0)  # Stop the platform
+def stop_command(args):
+    # STOP
+    platform.set_vel(0)
+    return 'OK'
 
-# Define TCP command map
-command_map = {
+
+# Set up TCP command map for the tcp_server module
+tcp.command_map = {
     'LED': led_command,
-    # Add more commands here as needed
+    'VEL': vel_command,
+    'DP': dp_command,
+    'MAG': mag_command,
+    'SPIN': spin_command,
+    'STOP': stop_command,
 }
 
 if __name__ == "__main__":
     # Connect to WiFi using wifi.txt (if needed)
-    tcp_server.connect_to_wifi_from_file("wifi.txt")
+    tcp.connect_to_wifi_from_file("wifi.txt")
     print("Starting TCP server...")
-    tcp_server.start_tcp_server(command_map, port=12345, led=led)
+    tcp.start(port=12345)

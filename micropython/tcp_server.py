@@ -1,46 +1,15 @@
 import socket
 import sys
 import network
+import _thread
 import time
 
-def parse_command_line(line):
-	"""
-	Parse a command line in the format CMD:arg1,arg2,...
-	Returns (cmd, args) where cmd is uppercase and args is a list of strings.
-	"""
-	line = line.strip()
-	colon_idx = line.find(':')
-	if colon_idx < 0:
-		cmd = line.upper()
-		args = []
-	elif colon_idx == 0:
-		return None, None  # Invalid command
-	else:
-		cmd = line[:colon_idx].strip().upper()
-		arg_str = line[colon_idx+1:].strip()
-		if not arg_str:
-			args = []
-		else:
-			args = [a.strip() for a in arg_str.split(',') if a.strip()]
-	return cmd, args
-
-def execute_command(cmd, args, command_map):
-	"""
-	Executes the command using the command_map. Returns response string.
-	"""
-	if cmd is None:
-		return 'ERR: Invalid command'
-	handler = command_map.get(cmd)
-	if handler:
-		try:
-			resp = handler(args)
-			if resp is None:
-				resp = 'OK'
-			return str(resp)
-		except Exception as e:
-			return 'ERR: ' + str(e)
-	else:
-		return 'UNKNOWN CMD'
+command_map = {}
+_tcp_sock = None
+_tcp_conn = None
+_tcp_addr = None
+_tcp_buffer = b''
+_tcp_running = False
 
 def connect_wifi(ssid, password, wait=True):
 	"""
@@ -69,38 +38,118 @@ def connect_to_wifi_from_file(config_file="wifi.txt"):
 		password = f.readline().strip()
 	return connect_wifi(ssid, password)
 
-def start_tcp_server(command_map, port=12345, led=None):
+def start(port=12345):
 	"""
-	Starts a TCP server. command_map: dict of command string -> handler(list_of_str_args)
-	Each handler is called as handler(args: list of str). Handler should return a string (response).
-	Optionally pass led=Pin instance for demo/test.
-	Command format: CMD:arg1,arg2,... (whitespace ignored, case-insensitive)
+	Starts the TCP server in a background thread. Uses global command_map.
 	"""
-	HOST = ''
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	s.bind((HOST, port))
-	s.listen(1)
+	global _tcp_sock, _tcp_running
+	if _tcp_running:
+		return
+	_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	_tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	_tcp_sock.bind(('', port))
+	_tcp_sock.listen(1)
+	_tcp_sock.setblocking(False)
+	_tcp_running = True
 	print('TCP server listening on port', port)
-	while True:
-		print('Waiting for connection...')
-		conn, addr = s.accept()
-		print('Client connected from', addr)
+	def _loop():
+		global _tcp_running
+		while _tcp_running:
+			_tcp_poll()
+			time.sleep(0.05)
+	_thread.start_new_thread(_loop, ())
+
+def stop():
+	"""
+	Stops the TCP server and closes sockets.
+	"""
+	global _tcp_running, _tcp_sock, _tcp_conn
+	_tcp_running = False
+	if _tcp_conn:
+		_tcp_conn.close()
+		_tcp_conn = None
+	if _tcp_sock:
+		_tcp_sock.close()
+		_tcp_sock = None
+	print('TCP server stopped.')
+
+def _tcp_poll():
+	global _tcp_sock, _tcp_conn, _tcp_addr, _tcp_buffer, _tcp_running
+	# Accept new connection if none
+	if _tcp_conn is None:
 		try:
-			while True:
-				data = conn.recv(1024)
-				if not data:
-					break
-				line = data.decode().strip()
-				print('Received:', line)
-				if not line:
-					conn.send(b'EMPTY\n')
-					continue
-				cmd, args = parse_command_line(line)
-				resp = execute_command(cmd, args, command_map)
-				conn.send((resp + '\n').encode())
+			conn, addr = _tcp_sock.accept()
+			conn.setblocking(False)
+			_tcp_conn = conn
+			_tcp_addr = addr
+			_tcp_buffer = b''
+			print('Client connected from', addr)
+		except OSError:
+			pass  # No connection yet
+	# Handle data from client
+	if _tcp_conn:
+		try:
+			data = _tcp_conn.recv(1024)
+			if data:
+				_tcp_buffer += data
+				# Process lines
+				while b'\n' in _tcp_buffer:
+					line, _tcp_buffer = _tcp_buffer.split(b'\n', 1)
+					line = line.decode().strip()
+					print('Received:', line)
+					if not line:
+						_tcp_conn.send(b'EMPTY\n')
+						continue
+					cmd, args = parse_command_line(line)
+					resp = execute_command(cmd, args, command_map)
+					_tcp_conn.send((resp + '\n').encode())
+			else:
+				# Connection closed by client
+				_tcp_conn.close()
+				print('Client disconnected')
+				_tcp_conn = None
+				_tcp_addr = None
+				_tcp_buffer = b''
+		except OSError:
+			pass  # No data available
+
+def execute_command(cmd, args, command_map):
+	"""
+	Executes the command using the command_map. Returns response string.
+	"""
+	if cmd is None:
+		return 'ERR: Invalid command'
+	handler = command_map.get(cmd)
+	if handler:
+		try:
+			resp = handler(args)
+			if resp is None:
+				resp = 'OK'
+			return str(resp)
 		except Exception as e:
-			print('Connection error:', e)
-		finally:
-			conn.close()
-			print('Client disconnected')
+			return 'ERR: ' + str(e)
+	else:
+		return 'UNKNOWN CMD'
+
+def parse_command_line(line):
+	"""
+	Parse a command line in the format CMD:arg1,arg2,...
+	Returns (cmd, args) where cmd is uppercase and args is a list of strings or None for empty args.
+	"""
+	line = line.strip()
+	colon_idx = line.find(':')
+	if colon_idx < 0:
+		cmd = line.upper()
+		args = []
+	elif colon_idx == 0:
+		return None, None  # Invalid command
+	else:
+		cmd = line[:colon_idx].strip().upper()
+		arg_str = line[colon_idx+1:]
+		# If arg_str is empty, return [None] (e.g. LED:)
+		if arg_str.strip() == '':
+			args = [None]
+		else:
+			# Split on commas, preserve empty fields as None
+			args = [a.strip() if a.strip() != '' else None for a in arg_str.split(',')]
+	return cmd, args
