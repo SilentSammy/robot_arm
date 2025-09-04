@@ -8,8 +8,8 @@ from motor_kin import EncodedMotor
 import tcp_server as tcp
 
 # Initialize arm (servo motors and joints)
-servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
-servo_b = ServoMotor(19, scale=-1.0, start_angle=-120)  # GPIO19 - excellent PWM pin for servos
+servo_a = ServoMotor(18, start_angle=0)  # GPIO18 - excellent PWM pin for servos
+servo_b = ServoMotor(19, scale=-1.0, start_angle=-0)  # GPIO19 - excellent PWM pin for servos
 shoulder = Joint(servo_a)
 elbow = Joint(servo_b)
 arm = Arm2D(shoulder, elbow)
@@ -79,7 +79,7 @@ def dp_command(args):
         dt = float(args[2]) if len(args) > 2 and args[2] is not None else 0
     except Exception:
         return 'ERR'
-    arm.move_by(dx, dy)
+    arm.move_by(dx, dy, speed=20)
     dt_counts = platform.degs_to_counts(dt)
     platform.snap_by(dt_counts)
     return 'OK'

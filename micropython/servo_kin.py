@@ -71,11 +71,11 @@ class Joint:
         self.target += increment
         self.speed = float('inf')  # Snap to new position immediately
     
-    def move_to(self, angle, speed):
+    def move_to(self, angle, speed=10):
         self.target = angle
         self.speed = speed  # Set speed for movement
     
-    def move_by(self, increment, speed):
+    def move_by(self, increment, speed=10):
         self.target += increment
         self.speed = speed  # Set speed for movement
     
