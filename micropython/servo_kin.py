@@ -258,16 +258,37 @@ class Arm2D:
         self.target = (current_x + dx, current_y + dy)
         self.speed = speed
     
-    def set_vels(self, vx, vy):
-        """Set cartesian velocity - arm moves continuously in direction of velocity vector"""
-        self.speed = math.sqrt(vx*vx + vy*vy)  # Magnitude of velocity
+    def get_vels(self):
+        """Get current cartesian velocity components (vx, vy)"""
+        if self.speed > 0:  # Currently moving
+            current_x, current_y = self.FK()
+            # Extract current velocity direction
+            dx = self.target[0] - current_x
+            dy = self.target[1] - current_y
+            # Normalize to get unit vector, then scale by current speed
+            d = math.sqrt(dx*dx + dy*dy)
+            if d < 0.01:  # Target is (almost) at current position
+                return (0, 0)
+            return (dx/d * self.speed, dy/d * self.speed)
+        else:  # Not moving
+            return (0, 0)
+
+    def set_vels(self, vx=None, vy=None):
+        """Set cartesian velocity - arm moves continuously in direction of velocity vector.
+        If vx or vy is None, maintain that component of the current velocity."""
+        
+        # Update components, keeping current value if None
+        final_vx = vx if vx is not None else self.get_vels()[0]
+        final_vy = vy if vy is not None else self.get_vels()[1]
+        
+        # Compute new velocity
+        self.speed = math.sqrt(final_vx*final_vx + final_vy*final_vy)
         if self.speed > 0:
             # Set target to a point far in the direction of velocity
-            current_x, current_y = self.FK()
-            # Normalize velocity and project far out
             scale = 1000  # Large distance
-            self.target = (current_x + vx/self.speed * scale, current_y + vy/self.speed * scale)
+            current_x, current_y = self.FK()
+            self.target = (current_x + final_vx/self.speed * scale, 
+                         current_y + final_vy/self.speed * scale)
         else:
             # Zero velocity - stop at current position
             self.target = self.FK()
-

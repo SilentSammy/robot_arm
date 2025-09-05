@@ -5,7 +5,7 @@ import math
 from hardware import ServoMotor, Encoder, DCMotor
 from servo_kin import Joint, Arm2D
 from motor_kin import EncodedMotor
-import tcp_server as tcp
+import ble_server as bs
 
 # Initialize arm (servo motors and joints)
 servo_a = ServoMotor(18, start_angle=0)  # GPIO18 - excellent PWM pin for servos
@@ -24,108 +24,43 @@ platform.enable()
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
 
-# Initialize LED for TCP demo
+# Initialize LED
 led = Pin(2, Pin.OUT)  # GPIO2 - onboard LED on most ESP32 boards
-led_state = False
 
-# Track current arm velocities for partial updates
-current_vx = 0.0
-current_vy = 0.0
+def set_led(value):
+    """Handle LED control (0-255, but treat as binary)"""
+    led.value(1 if value else 0)
 
-def plat_stats():
-    print(platform._current_target_counts)
-    print(platform.encoder.get_count())
+def set_vx(value):
+    """Handle X velocity control (-100 to 100 cm/s)"""
+    vx = bs.to_bipolar(value) * 100
+    arm.set_vels(vx=vx)  # Update only X component
 
-def led_command(args):
-    global led_state
-    # LED: 1 (on), 0 (off), toggle if no arg or arg is None
-    if not args or args[0] is None:
-        led_state = not led_state
-        led.value(led_state)
-        return str(int(led_state))
-    try:
-        val = int(args[0])
-        led_state = bool(val)
-        led.value(led_state)
-        return str(int(led_state))
-    except Exception:
-        return 'ERR'
+def set_vy(value):
+    """Handle Y velocity control (-100 to 100 cm/s)"""
+    vy = bs.to_bipolar(value) * 100
+    arm.set_vels(vy=vy)  # Update only Y component
 
-def vel_command(args):
-    # VEL: vx, vy, w (vx=arm x vel, vy=arm y vel, w=platform deg/s)
-    global current_vx, current_vy
-    try:
-        vx = float(args[0]) if len(args) > 0 and args[0] is not None else None
-        vy = float(args[1]) if len(args) > 1 and args[1] is not None else None
-        w_deg = float(args[2]) if len(args) > 2 and args[2] is not None else None
-    except Exception:
-        return 'ERR'
-    if vx is not None:
-        current_vx = vx
-    if vy is not None:
-        current_vy = vy
-    if (vx is not None) or (vy is not None):
-        arm.set_vels(current_vx, current_vy)
-    if w_deg is not None:
-        w_counts = platform.degs_to_counts(w_deg)
-        platform.set_vel(w_counts)
-    return 'OK'
+def set_w(value):
+    """Handle angular velocity control (-90 to 90 deg/s)"""
+    w = bs.to_bipolar(value)
+    w_counts = platform.degs_to_counts(w * 90)  # Scale to ±90 deg/s
+    platform.set_vel(w_counts)
 
-def dp_command(args):
-    # DP: dx, dy, dt (all optional, just numbers, default 0)
-    try:
-        dx = int(float(args[0])) if len(args) > 0 and args[0] is not None else 0
-        dy = int(float(args[1])) if len(args) > 1 and args[1] is not None else 0
-        dt = float(args[2]) if len(args) > 2 and args[2] is not None else 0
-    except Exception:
-        return 'ERR'
-    arm.move_by(dx, dy, speed=20)
-    dt_counts = platform.degs_to_counts(dt)
-    platform.snap_by(dt_counts)
-    return 'OK'
+def set_mag(value):
+    """Handle electromagnet control (0-255, but treat as binary)"""
+    mag.value(1 if value else 0)
 
-def mag_command(args):
-    # MAG: 1 (on), 0 (off), toggle if no arg or arg is None
-    current = mag.value()
-    if not args or args[0] is None:
-        new_state = 0 if current else 1
-    else:
-        try:
-            new_state = 1 if int(args[0]) else 0
-        except Exception:
-            return 'ERR'
-    mag.value(new_state)
-    return str(mag.value())
-
-def spin_command(args):
-    # SPIN[:speed] (default 100)
-    speed = 100
-    if args and args[0]:
-        try:
-            speed = int(float(args[0]))
-        except Exception:
-            return 'ERR'
-    platform.set_vel(speed)
-    return 'OK'
-
-def stop_command(args):
-    # STOP
-    platform.set_vel(0)
-    return 'OK'
-
-
-# Set up TCP command map for the tcp_server module
-tcp.command_map = {
-    'LED': led_command,
-    'VEL': vel_command,
-    'DP': dp_command,
-    'MAG': mag_command,
-    'SPIN': spin_command,
-    'STOP': stop_command,
+# Set up BLE server
+bs.DEVICE_NAME = "RoboArm"
+bs.control_callbacks = {
+    1: set_led,
+    2: set_vx,
+    3: set_vy,
+    4: set_w,
+    5: set_mag,
 }
 
 if __name__ == "__main__":
-    # Connect to WiFi using wifi.txt (if needed)
-    tcp.connect_to_wifi_from_file("wifi.txt")
-    print("Starting TCP server...")
-    tcp.start(port=12345)
+    print("Starting BLE server...")
+    bs.start()
