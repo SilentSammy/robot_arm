@@ -59,35 +59,60 @@ async def main():
         print("Example: '0 100' sets control 0 to value 100")
         print("Enter 'x' to exit\n")
 
+        def map_vel(val):
+            # Map from -100..100 to 0..255
+            val = max(-100, min(100, val))
+            return int(round((val + 100) * 255 / 200))
+
         while True:
             try:
-                cmd = input("Enter command: ").strip().lower()
+                cmd = input("Enter command (x=exit, vx <val>, vy <val>, or <control_number> <value>): ").strip().lower()
                 if cmd == 'x':
                     break
-                    
-                # Parse input in format: "control_number value"
+
                 parts = cmd.split()
-                if len(parts) != 2:
-                    print("Invalid format. Use: <control_number> <value>")
+                if len(parts) == 2 and parts[0] in ('vx', 'vy'):
+                    axis = parts[0]
+                    try:
+                        val = float(parts[1])
+                    except ValueError:
+                        print("Invalid value. Use a number between -100 and 100.")
+                        continue
+                    if val < -100 or val > 100:
+                        print("Value out of range. Use -100 to 100.")
+                        continue
+                    mapped = map_vel(val)
+                    if axis == 'vx':
+                        idx = 1  # vx is control 2, index 1
+                    else:
+                        idx = 2  # vy is control 3, index 2
+                    char_uuid = get_char_uuid(idx)
+                    await client.write_gatt_char(char_uuid, bytes([mapped]))
+                    print(f"{axis.upper()} set to {val} (sent {mapped})")
                     continue
-                    
+
+                # Fallback: original manual control
+                if len(parts) != 2:
+                    print("Invalid format. Use: vx <val>, vy <val>, or <control_number> <value>")
+                    continue
+
                 control_num, value = parts
                 control_num = int(control_num)
                 value = int(value)
-                
+
                 if control_num < 0 or control_num >= len(chars):
                     print(f"Invalid control number. Use 0-{len(chars)-1}")
                     continue
-                    
+
                 if value < 0 or value > 255:
                     print("Invalid value. Use 0-255")
                     continue
-                    
+
                 # Write to the appropriate characteristic
                 char_uuid = get_char_uuid(control_num)
                 await client.write_gatt_char(char_uuid, bytes([value]))
                 print(f"Control {control_num} set to {value}")
-                
+
             except ValueError:
                 print("Invalid input. Use numbers only.")
             except Exception as e:
