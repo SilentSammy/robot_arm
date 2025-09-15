@@ -2,159 +2,121 @@ from bleak import BleakClient, BleakScanner
 import asyncio
 import sys
 
-# Base UUID for the service and characteristics
-BASE_UUID = "12345678-1234-5678-1234-56789abcdef"
-SERVICE_UUID = f"{BASE_UUID}0"
-DEVICE_NAME = "RoboArm"  # Match the name in the server
+# Conversion helpers
+def from_norm(norm):
+    """Convert 0.0-1.0 float to 0-255 int"""
+    val = int(round(norm * 256))
+    return max(0, min(255, val))
 
-_char_uuids = []  # Will store discovered characteristic UUIDs
+def from_bipolar(bipolar):
+    """Convert -1.0-1.0 float to 0-255 int"""
+    val = int(round((bipolar * 128) + 128))
+    return max(0, min(255, val))
 
-def get_char_uuid(index):
-    """Get the UUID for the characteristic at the given index"""
-    return _char_uuids[index]
-
-async def find_device():
-    print(f"Scanning for {DEVICE_NAME}...")
-    device = await BleakScanner.find_device_by_filter(
-        lambda d, ad: d.name and d.name.lower() == DEVICE_NAME.lower()
-    )
-    
-    if not device:
-        print(f"Could not find {DEVICE_NAME}")
-        return None
-        
-    print(f"Found {DEVICE_NAME} at {device.address}")
-    return device
+def map_vel(val):
+    """Map velocity from -100..100 to 0..255 range"""
+    val = max(-1.0, min(1.0, val/100.0)) # Normalize to -1..1
+    return from_bipolar(val)
 
 class ArmBLEClient:
-    def __init__(self):
+    def __init__(self, device_name="RoboArm", base_uuid="12345678-1234-5678-1234-56789abcdef"):
+        self.device_name = device_name
+        self.base_uuid = base_uuid
         self.device = None
         self.client = None
+        
+        # Cache last sent mapped values to avoid redundant BLE writes
+        self._cached_char_values = {}
+    
+    # Communication methods
+    async def find_device(self):
+        print(f"Scanning for {self.device_name}...")
+        device = await BleakScanner.find_device_by_filter( lambda d, ad: d.name and d.name.lower() == self.device_name.lower() )
+        if not device:
+            print(f"Could not find {self.device_name}")
+            return None
+        print(f"Found {self.device_name} at {device.address}")
+        return device
 
     async def connect(self):
-        self.device = await find_device()
+        self.device = await self.find_device()
         if not self.device:
             raise Exception("Device not found")
 
         self.client = BleakClient(self.device)
         await self.client.connect()
         print(f"Connected to {self.device.name}")
-        
-        # Get all characteristics to determine how many controls are available
-        # Find our service and its characteristics
-        global _char_uuids
-        _char_uuids = []
-        
-        for service in self.client.services:
-            if service.uuid.lower() == SERVICE_UUID.lower():
-                chars = service.characteristics
-                _char_uuids = [char.uuid for char in chars]
-                break
-        else:  # No service found
-            chars = []
-            
-        if not chars:
-            print("No controls found!")
-            return
-            
-        print(f"\nFound {len(chars)} controls:")
-        print("Control Index -> UUID mapping:")
-        for i, uuid in enumerate(_char_uuids):
-            print(f"  {i} -> {uuid}")
-        print("\nFormat: <index> <value> (use index shown above)")
-        print("Example: '0 100' sets control 0 to value 100")
-        print("Enter 'x' to exit\n")
 
     async def disconnect(self):
         if self.client:
             await self.client.disconnect()
             print("Disconnected.")
 
+    async def set_char(self, char_uuid, value):
+        if self._cached_char_values.get(char_uuid) == value:
+            # print("No change, skipping write") # Commented to avoid spamming output
+            return  # No change, skip write
+        await self.client.write_gatt_char(char_uuid, bytes([value]))
+        self._cached_char_values[char_uuid] = value
+
+    # Setters for each control
     async def set_led(self, state):
         """Set the LED state on the device."""
-        if len(_char_uuids) == 0:
-            print("No characteristic UUIDs found. Cannot set LED state.")
-            return
-        
-        # Assuming the first characteristic is the LED control
-        led_char_uuid = _char_uuids[0]  
-        value = 1 if state else 0
-        await self.client.write_gatt_char(led_char_uuid, bytes([value]))
+        await self.set_char(self.base_uuid + "1", int(state))
 
-async def main():
-    from input_manager.input_man import rising_edge, falling_edge
+    async def set_vx(self, vx):
+        """Set X velocity (-100 to 100)"""
+        mapped = map_vel(vx)
+        await self.set_char(self.base_uuid + "2", mapped)
+
+    async def set_vy(self, vy):
+        """Set Y velocity (-100 to 100)"""
+        mapped = map_vel(vy)
+        await self.set_char(self.base_uuid + "3", mapped)
+
+    async def set_w(self, w):
+        """Set angular velocity w in degrees/sec (expected range -100..100)."""
+        mapped = map_vel(w)
+        await self.set_char(self.base_uuid + "4", mapped)
+
+
+async def main_loop():
+    from input_manager.input_man import rising_edge, falling_edge, is_pressed
+
     arm = ArmBLEClient()
     await arm.connect()
-    print("Connected. Press X to toggle LED, Q to quit. Use WASD for vx/vy.")
-    led_on = False
-    VXY_STEP = 15  # Step size for WASD
-    vx = 0
-    vy = 0
-    prev_vx = None
-    prev_vy = None
+    print("Connected")
+
+    xy_mag = 15 # cm/s per key press
     try:
         while True:
-            # LED control
             if rising_edge('x'):
+                # schedule fire-and-forget on the running loop
                 await arm.set_led(True)
-                led_on = True
-                print("LED ON")
             if falling_edge('x'):
                 await arm.set_led(False)
-                led_on = False
-                print("LED OFF")
+            
+            # X axis (A/D)
+            vx = int(is_pressed('d')) - int(is_pressed('a'))
+            vx *= xy_mag
+            await arm.set_vx(vx)
 
-            # WASD velocity control
-            # W/S control vy (+100/-100), A/D control vx (-100/+100)
-            # On key press, set to value; on key release, set to 0
-            # Priority: if both W/S or A/D pressed, last pressed wins
-            # vx: -100 (A), +100 (D), 0 (release)
-            # vy: +100 (W), -100 (S), 0 (release)
+            # Y axis (W/S)
+            vy = int(is_pressed('w')) - int(is_pressed('s'))
+            vy *= xy_mag
+            await arm.set_vy(vy)
 
-            # Handle vx
-            if rising_edge('a'):
-                vx = -100 if VXY_STEP >= 100 else -VXY_STEP
-            elif rising_edge('d'):
-                vx = 100 if VXY_STEP >= 100 else VXY_STEP
-            if falling_edge('a') or falling_edge('d'):
-                vx = 0
+            # Angular velocity (Q/E) - Q = negative, E = positive
+            w = int(is_pressed('q')) - int(is_pressed('e'))
+            w *= 60
+            await arm.set_w(w)
 
-            # Handle vy
-            if rising_edge('w'):
-                vy = 100 if VXY_STEP >= 100 else VXY_STEP
-            elif rising_edge('s'):
-                vy = -100 if VXY_STEP >= 100 else -VXY_STEP
-            if falling_edge('w') or falling_edge('s'):
-                vy = 0
-
-            def map_vel(val):
-                val = max(-100, min(100, val))
-                return int(round((val + 100) * 255 / 200))
-
-            # Only send if changed
-            if vx != prev_vx:
-                if len(_char_uuids) > 1:
-                    await arm.client.write_gatt_char(_char_uuids[1], bytes([map_vel(vx)]))
-                    print(f"VX set to {vx}")
-                prev_vx = vx
-            if vy != prev_vy:
-                if len(_char_uuids) > 2:
-                    await arm.client.write_gatt_char(_char_uuids[2], bytes([map_vel(vy)]))
-                    print(f"VY set to {vy}")
-                prev_vy = vy
-
-            await asyncio.sleep(0.01)
-    except KeyboardInterrupt:
-        print("\nExiting...")
+            await asyncio.sleep(0.01)   # keep the loop responsive
     finally:
-        await arm.set_led(False)
+        await arm.set_vx(0)
+        await arm.set_vy(0)
+        await arm.set_w(0)
         await arm.disconnect()
-        print("Disconnected.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nExiting...")
-    finally:
-        print("Done.")
+    asyncio.run(main_loop())

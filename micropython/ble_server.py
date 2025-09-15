@@ -110,11 +110,3 @@ def to_norm(value):
 def to_bipolar(value):
     """Convert 0-255 to -1.0-1.0 float"""
     return (value - 128) / 128.0
-
-def to_range(value, out_min, out_max):
-    """Convert 0-255 to custom float range"""
-    return (value * (out_max - out_min) / 255.0) + out_min
-
-def to_char(value):
-    """Convert to ASCII character"""
-    return chr(value)
