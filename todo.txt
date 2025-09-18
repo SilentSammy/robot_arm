@@ -20,7 +20,9 @@
 -- figure out what's causing those servo jumps
 -- make ArmBLEClient reconnect gracefully
 - add arm (circular?) exclusion zones to protect servos. but we need to make sure that even if the selected location is valid, the trajectory doesn't cross an exclusion zone.
-- add incremental control mode  
+- add incremental control mode
+-- improve platform speed controller
+- update code to work with flipped shoulder servo
 
 HARDWARE
 + Electromagnet holder
@@ -30,3 +32,6 @@ HARDWARE
 + redesign battery holder for less risk of breaking
 - stronger electromagnet holder
 - wider tripod base (equilateral)
+- thicker panel holders
+- holes for zipties
+- turn shoulder servo upside down for greater vertical range

@@ -52,8 +52,8 @@ class ArmBLEClient:
             await self.client.disconnect()
             print("Disconnected.")
 
-    async def set_char(self, char_uuid, value):
-        if self._cached_char_values.get(char_uuid) == value:
+    async def set_char(self, char_uuid, value, force=False):
+        if not force and self._cached_char_values.get(char_uuid) == value:
             # print("No change, skipping write") # Commented to avoid spamming output
             return  # No change, skip write
         await self.client.write_gatt_char(char_uuid, bytes([value]))
@@ -79,6 +79,20 @@ class ArmBLEClient:
         mapped = map_vel(w)
         await self.set_char(self.base_uuid + "4", mapped)
 
+    async def inc_x(self, delta_cm):
+        """Increment X position by a small amount (-30 to 30 cm)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 30.0)))
+        await self.set_char(self.base_uuid + "6", mapped, force=True)
+    
+    async def inc_y(self, delta_cm):
+        """Increment Y position by a small amount (-30 to 30 cm)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 30.0)))
+        await self.set_char(self.base_uuid + "7", mapped, force=True)
+    
+    async def inc_theta(self, delta_deg):
+        """Increment angle by a small amount (-90 to 90 degrees)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_deg / 90.0)))
+        await self.set_char(self.base_uuid + "8", mapped, force=True)
 
 async def main_loop():
     from input_manager.input_man import rising_edge, falling_edge, is_pressed
@@ -87,29 +101,46 @@ async def main_loop():
     await arm.connect()
     print("Connected")
 
-    xy_mag = 15 # cm/s per key press
     try:
         while True:
             if rising_edge('x'):
-                # schedule fire-and-forget on the running loop
                 await arm.set_led(True)
             if falling_edge('x'):
                 await arm.set_led(False)
             
-            # X axis (A/D)
-            vx = int(is_pressed('d')) - int(is_pressed('a'))
-            vx *= xy_mag
-            await arm.set_vx(vx)
+            if not is_pressed('c'): # Velocity control mode
+                vxy_mag = 15 # cm/s per key press
+                w_mag = 60  # deg/s per key press
 
-            # Y axis (W/S)
-            vy = int(is_pressed('w')) - int(is_pressed('s'))
-            vy *= xy_mag
-            await arm.set_vy(vy)
+                # X axis (A/D)
+                vx = int(is_pressed('d')) - int(is_pressed('a'))
+                vx *= vxy_mag
+                await arm.set_vx(vx)
 
-            # Angular velocity (Q/E) - Q = negative, E = positive
-            w = int(is_pressed('q')) - int(is_pressed('e'))
-            w *= 60
-            await arm.set_w(w)
+                # Y axis (W/S)
+                vy = int(is_pressed('w')) - int(is_pressed('s'))
+                vy *= vxy_mag
+                await arm.set_vy(vy)
+
+                # Angular velocity (Q/E) - Q = negative, E = positive
+                w = int(is_pressed('q')) - int(is_pressed('e'))
+                w *= w_mag
+                await arm.set_w(w)
+            else: # Incremental position mode
+                inc_xy_mag = 1 # cm per key press
+                inc_theta_mag = 5 # degrees per key press
+                if rising_edge('a'):
+                    await arm.inc_x(-inc_xy_mag)
+                if rising_edge('d'):
+                    await arm.inc_x(inc_xy_mag)
+                if rising_edge('w'):
+                    await arm.inc_y(inc_xy_mag)
+                if rising_edge('s'):
+                    await arm.inc_y(-inc_xy_mag)
+                if rising_edge('q'):
+                    await arm.inc_theta(-inc_theta_mag)
+                if rising_edge('e'):
+                    await arm.inc_theta(inc_theta_mag)
 
             await asyncio.sleep(0.01)   # keep the loop responsive
     finally:

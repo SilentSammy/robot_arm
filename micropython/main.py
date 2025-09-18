@@ -8,8 +8,8 @@ from motor_kin import EncodedMotor
 import ble_server as bs
 
 # Initialize arm (servo motors and joints)
-servo_a = ServoMotor(18, start_angle=0)  # GPIO18 - excellent PWM pin for servos
-servo_b = ServoMotor(19, scale=-1.0, start_angle=-0)  # GPIO19 - excellent PWM pin for servos
+servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
+servo_b = ServoMotor(19, scale=-1.0, start_angle=-120)  # GPIO19 - excellent PWM pin for servos
 shoulder = Joint(servo_a)
 elbow = Joint(servo_b)
 arm = Arm2D(shoulder, elbow)
@@ -36,20 +36,41 @@ def set_vx(value):
     vx = bs.to_bipolar(value) * 100
     arm.set_vels(vx=vx)  # Update only X component
 
+    # Debug arm target and speed
+    print(f"Arm target: {arm.target}, speed: {arm.speed}")
+
 def set_vy(value):
     """Handle Y velocity control (-100 to 100 cm/s)"""
     vy = bs.to_bipolar(value) * 100
     arm.set_vels(vy=vy)  # Update only Y component
 
 def set_w(value):
-    """Handle angular velocity control (-90 to 90 deg/s)"""
+    """Handle angular velocity control"""
     w = bs.to_bipolar(value)
-    w_counts = platform.degs_to_counts(w * 90)  # Scale to ±90 deg/s
+    w_counts = platform.degs_to_counts(w * 100)  # Scale to ±100 deg/s
     platform.set_vel(w_counts)
 
 def set_mag(value):
     """Handle electromagnet control (0-255, but treat as binary)"""
     mag.value(1 if value else 0)
+
+def inc_x(value):
+    """Increment X position by a small amount (-30 to 30 cm)"""
+    delta = bs.to_bipolar(value) * 30  # Scale to ±30 cm
+    arm.move_by(dx=delta)
+    
+    # Debug arm target and speed
+    print(f"Arm target: {arm.target}, speed: {arm.speed}")
+
+def inc_y(value):
+    """Increment Y position by a small amount (-30 to 30 cm)"""
+    delta = bs.to_bipolar(value) * 30  # Scale to ±30 cm
+    arm.move_by(dy=delta)
+
+def inc_theta(value):
+    """Increment angle by a small amount (-90 to 90 degrees)"""
+    delta = bs.to_bipolar(value) * 90  # Scale to ±90 degrees
+    platform.snap_by(delta)
 
 # Set up BLE server
 bs.DEVICE_NAME = "RoboArm"
@@ -59,6 +80,9 @@ bs.control_callbacks = {
     3: set_vy,
     4: set_w,
     5: set_mag,
+    6: inc_x,
+    7: inc_y,
+    8: inc_theta,
 }
 
 if __name__ == "__main__":
