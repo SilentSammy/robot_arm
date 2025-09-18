@@ -228,7 +228,10 @@ class Arm2D:
     # Cartesian control methods similar to Joint class
     def snap_to(self, x=None, y=None):
         """Snap arm to (x,y) position immediately. If x or y is None, use current value."""
-        current_x, current_y = self.target
+        # Stop any active velocity movement first
+        self.set_vels(vx=0, vy=0)
+        # Now use FK() to get actual current position
+        current_x, current_y = self.FK()
         if x is None:
             x = current_x
         if y is None:
@@ -238,13 +241,19 @@ class Arm2D:
 
     def snap_by(self, dx=0, dy=0):
         """Snap arm by relative offset immediately"""
-        current_x, current_y = self.target
+        # Stop any active velocity movement first
+        self.set_vels(vx=0, vy=0)
+        # Now use FK() to get actual current position
+        current_x, current_y = self.FK()
         self.target = (current_x + dx, current_y + dy)
         self.speed = float('inf')
 
     def move_to(self, x=None, y=None, speed=10):
         """Move arm to (x,y) position at specified speed. If x or y is None, use current value."""
-        current_x, current_y = self.target
+        # Stop any active velocity movement first
+        self.set_vels(vx=0, vy=0)
+        # Now use FK() to get actual current position
+        current_x, current_y = self.FK()
         if x is None:
             x = current_x
         if y is None:
@@ -254,24 +263,15 @@ class Arm2D:
     
     def move_by(self, dx=0, dy=0, speed=10):
         """Move arm by relative offset at specified speed"""
-        current_x, current_y = self.target
+        # Stop any active velocity movement first
+        self.set_vels(vx=0, vy=0)
+        # Now use FK() to get actual current position
+        current_x, current_y = self.FK()
+        # Skip tiny movements that are likely precision errors
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            return
         self.target = (current_x + dx, current_y + dy)
         self.speed = speed
-    
-    def get_vels(self):
-        """Get current cartesian velocity components (vx, vy)"""
-        if self.speed > 0:  # Currently moving
-            current_x, current_y = self.FK()
-            # Extract current velocity direction
-            dx = self.target[0] - current_x
-            dy = self.target[1] - current_y
-            # Normalize to get unit vector, then scale by current speed
-            d = math.sqrt(dx*dx + dy*dy)
-            if d < 0.01:  # Target is (almost) at current position
-                return (0, 0)
-            return (dx/d * self.speed, dy/d * self.speed)
-        else:  # Not moving
-            return (0, 0)
 
     def set_vels(self, vx=None, vy=None):
         """Set cartesian velocity - arm moves continuously in direction of velocity vector.
@@ -292,3 +292,19 @@ class Arm2D:
         else:
             # Zero velocity - stop at current position
             self.target = self.FK()
+
+    def get_vels(self):
+        """Get current cartesian velocity components (vx, vy)"""
+        if self.speed > 0:  # Currently moving
+            current_x, current_y = self.FK()
+            # Extract current velocity direction
+            dx = self.target[0] - current_x
+            dy = self.target[1] - current_y
+            # Normalize to get unit vector, then scale by current speed
+            d = math.sqrt(dx*dx + dy*dy)
+            if d < 0.01:  # Target is (almost) at current position
+                return (0, 0)
+            return (dx/d * self.speed, dy/d * self.speed)
+        else:  # Not moving
+            return (0, 0)
+

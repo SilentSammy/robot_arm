@@ -27,27 +27,30 @@ mag = Pin(15, Pin.OUT)
 # Initialize LED
 led = Pin(2, Pin.OUT)  # GPIO2 - onboard LED on most ESP32 boards
 
+def arm_debug():
+    print(f"Arm target: {arm.target}, Arm pos: {arm.FK()}, speed: {arm.speed}")
+
 def set_led(value):
     """Handle LED control (0-255, but treat as binary)"""
     led.value(1 if value else 0)
 
 def set_vx(value):
-    """Handle X velocity control (-100 to 100 cm/s)"""
-    vx = bs.to_bipolar(value) * 100
+    """Handle X velocity control (-128 to 127 cm/s)"""
+    vx = bs.to_bipolar(value) * 128
     arm.set_vels(vx=vx)  # Update only X component
 
-    # Debug arm target and speed
-    print(f"Arm target: {arm.target}, speed: {arm.speed}")
+    # Debug
+    print(f"Value: {value}, Vx: {vx}, Arm target: {arm.target}, Arm pos: {arm.FK()}, speed: {arm.speed}")
 
 def set_vy(value):
-    """Handle Y velocity control (-100 to 100 cm/s)"""
-    vy = bs.to_bipolar(value) * 100
+    """Handle Y velocity control (-128 to 127 cm/s)"""
+    vy = bs.to_bipolar(value) * 128
     arm.set_vels(vy=vy)  # Update only Y component
 
 def set_w(value):
     """Handle angular velocity control"""
     w = bs.to_bipolar(value)
-    w_counts = platform.degs_to_counts(w * 100)  # Scale to ±100 deg/s
+    w_counts = platform.degs_to_counts(w * 128)  # Scale to ±128 deg/s
     platform.set_vel(w_counts)
 
 def set_mag(value):
@@ -56,20 +59,20 @@ def set_mag(value):
 
 def inc_x(value):
     """Increment X position by a small amount (-30 to 30 cm)"""
-    delta = bs.to_bipolar(value) * 30  # Scale to ±30 cm
+    delta = bs.to_bipolar(value) * 32  # Scale to ±32 cm
     arm.move_by(dx=delta)
     
-    # Debug arm target and speed
-    print(f"Arm target: {arm.target}, speed: {arm.speed}")
+    # Debug
+    print(f"Value: {value}, Delta X: {delta}, Arm target: {arm.target}, Arm pos: {arm.FK()}, speed: {arm.speed}")
 
 def inc_y(value):
     """Increment Y position by a small amount (-30 to 30 cm)"""
-    delta = bs.to_bipolar(value) * 30  # Scale to ±30 cm
+    delta = bs.to_bipolar(value) * 32  # Scale to ±32 cm
     arm.move_by(dy=delta)
 
 def inc_theta(value):
     """Increment angle by a small amount (-90 to 90 degrees)"""
-    delta = bs.to_bipolar(value) * 90  # Scale to ±90 degrees
+    delta = bs.to_bipolar(value) * 128  # Scale to ±128 degrees
     platform.snap_by(delta)
 
 # Set up BLE server

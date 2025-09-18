@@ -14,8 +14,9 @@ def from_bipolar(bipolar):
     return max(0, min(255, val))
 
 def map_vel(val):
-    """Map velocity from -100..100 to 0..255 range"""
-    val = max(-1.0, min(1.0, val/100.0)) # Normalize to -1..1
+    """Map velocity from -128..127 to 0..255 range"""
+    rng = 128
+    val = max(-1.0, min(1.0, val/rng)) # Normalize to -1..1
     return from_bipolar(val)
 
 class ArmBLEClient:
@@ -80,18 +81,18 @@ class ArmBLEClient:
         await self.set_char(self.base_uuid + "4", mapped)
 
     async def inc_x(self, delta_cm):
-        """Increment X position by a small amount (-30 to 30 cm)"""
-        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 30.0)))
+        """Increment X position by a small amount (-32 to 32 cm)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 32.0)))
         await self.set_char(self.base_uuid + "6", mapped, force=True)
     
     async def inc_y(self, delta_cm):
-        """Increment Y position by a small amount (-30 to 30 cm)"""
-        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 30.0)))
+        """Increment Y position by a small amount (-32 to 32 cm)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_cm / 32.0)))
         await self.set_char(self.base_uuid + "7", mapped, force=True)
     
     async def inc_theta(self, delta_deg):
-        """Increment angle by a small amount (-90 to 90 degrees)"""
-        mapped = from_bipolar(max(-1.0, min(1.0, delta_deg / 90.0)))
+        """Increment angle by a small amount (-128 to 128 degrees)"""
+        mapped = from_bipolar(max(-1.0, min(1.0, delta_deg / 128.0)))
         await self.set_char(self.base_uuid + "8", mapped, force=True)
 
 async def main_loop():
