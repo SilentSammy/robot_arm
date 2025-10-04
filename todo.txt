@@ -31,8 +31,16 @@ HARDWARE
 + decrease axle height slightly + reinforce base axle.
 + more surface area for breadboard support + ziptie holes
 + redesign battery holder for less risk of breaking
-- stronger electromagnet holder
-- wider tripod base (equilateral)
-- thicker panel holders
-- holes for zipties
++ stronger electromagnet holder
+
++ wider tripod base (equilateral) (maybe circular, but still 3 equidistant wheels)
++ holes for zipties
+
++ thicker panel holders
++ position shoulder panel slightly higher to allow motor to be placed after assembly
++ battery holder
+
++ make it harder to unhook end effector
++ make grappling hook
+
 - turn shoulder servo upside down for greater vertical range

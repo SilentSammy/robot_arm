@@ -109,6 +109,9 @@ async def main_loop():
             if falling_edge('x'):
                 await arm.set_led(False)
             
+            # Check for c key rising edge to clear pending edges when switching modes
+            c_rising = rising_edge('c')
+            
             if not is_pressed('c'): # Velocity control mode
                 vxy_mag = 15 # cm/s per key press
                 w_mag = 60  # deg/s per key press
@@ -128,6 +131,15 @@ async def main_loop():
                 w *= w_mag
                 await arm.set_w(w)
             else: # Incremental position mode
+                # If we just pressed 'c', consume any lingering rising edges to avoid phantom keypresses
+                if c_rising:
+                    # Consume any pending rising edges from the control keys
+                    rising_edge('a')
+                    rising_edge('d')
+                    rising_edge('w')
+                    rising_edge('s')
+                    rising_edge('q')
+                    rising_edge('e')
                 inc_xy_mag = 1 # cm per key press
                 inc_theta_mag = 5 # degrees per key press
                 if rising_edge('a'):
