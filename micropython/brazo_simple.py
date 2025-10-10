@@ -65,7 +65,7 @@ class Encoder:
         return f"Encoder: {self.get_count()} counts ({'HW' if self.hardware_encoder else 'SW'})"
 
 class DCMotor:
-    def __init__(self, ena_pin, in1_pin, in2_pin, freq=32, power_limit=0.25):
+    def __init__(self, ena_pin, in1_pin, in2_pin, freq=48, power_limit=0.25):
         """
         DC Motor control using 3-pin system: ENA (PWM), IN1, IN2.
         ena_pin: PWM pin for speed control
@@ -499,7 +499,7 @@ class Arm2D:
         # Workspace limits
         self.x_min = 9
         self.x_max = 30
-        self.y_min = -8
+        self.y_min = -7
         self.y_max = 30
 
     @property

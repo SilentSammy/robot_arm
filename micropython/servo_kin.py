@@ -98,7 +98,7 @@ class Arm2D:
         # Workspace limits
         self.x_min = 9
         self.x_max = 30
-        self.y_min = -8
+        self.y_min = -7
         self.y_max = 30
 
     @property
