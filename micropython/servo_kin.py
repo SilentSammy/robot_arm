@@ -94,11 +94,25 @@ class Arm2D:
         self.speed = 0
         self.last_update = None
         self.tmr = None
+        
+        # Workspace limits
+        self.x_min = 9
+        self.x_max = 30
+        self.y_min = -8
+        self.y_max = 30
 
     @property
     def enabled(self):
         """Check if arm control is enabled"""
         return self.tmr is not None
+    
+    def _validate_position(self, x, y):
+        """Validate that (x,y) is within allowed workspace limits"""
+        if not (self.x_min <= x <= self.x_max):
+            raise ValueError(f"X position {x} outside valid range [{self.x_min}, {self.x_max}]")
+        if not (self.y_min <= y <= self.y_max):
+            raise ValueError(f"Y position {y} outside valid range [{self.y_min}, {self.y_max}]")
+        return True
 
     def FK(self):
         """
@@ -141,6 +155,7 @@ class Arm2D:
         """
         Move arm to specified (x, y) position using inverse kinematics.
         """
+        self._validate_position(x, y)
         theta1, theta2 = self.IK(x, y)
         self.shoulder.write(theta1)
         self.elbow.write(theta2)
@@ -221,7 +236,7 @@ class Arm2D:
         try:
             self.set(next_x, next_y)
         except ValueError:
-            # Target unreachable - stop at current position
+            # Target unreachable or out of bounds - stop at current position
             self.target = self.FK()
             self.speed = 0
 
@@ -236,6 +251,7 @@ class Arm2D:
             x = current_x
         if y is None:
             y = current_y
+        self._validate_position(x, y)
         self.target = (x, y)
         self.speed = float('inf')
 
@@ -245,7 +261,9 @@ class Arm2D:
         self.set_vels(vx=0, vy=0)
         # Now use FK() to get actual current position
         current_x, current_y = self.FK()
-        self.target = (current_x + dx, current_y + dy)
+        new_x, new_y = current_x + dx, current_y + dy
+        self._validate_position(new_x, new_y)
+        self.target = (new_x, new_y)
         self.speed = float('inf')
 
     def move_to(self, x=None, y=None, speed=10):
@@ -258,6 +276,7 @@ class Arm2D:
             x = current_x
         if y is None:
             y = current_y
+        self._validate_position(x, y)
         self.target = (x, y)
         self.speed = speed
     
@@ -270,7 +289,9 @@ class Arm2D:
         # Skip tiny movements that are likely precision errors
         if abs(dx) < 1e-6 and abs(dy) < 1e-6:
             return
-        self.target = (current_x + dx, current_y + dy)
+        new_x, new_y = current_x + dx, current_y + dy
+        self._validate_position(new_x, new_y)
+        self.target = (new_x, new_y)
         self.speed = speed
 
     def set_vels(self, vx=None, vy=None):
