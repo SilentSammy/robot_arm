@@ -120,6 +120,10 @@ class ArmBLEClient:
         """Set the LED state on the device."""
         await self.set_char(self.base_uuid + "1", int(state))
 
+    async def set_mag(self, state):
+        """Set the magnet state on the device."""
+        await self.set_char(self.base_uuid + "5", int(state))
+
     async def set_vx(self, vx):
         """Set X velocity (-100 to 100)"""
         mapped = map_vel(vx)
@@ -161,7 +165,12 @@ async def main_loop():
                 await arm.set_led(True)
             if falling_edge('x'):
                 await arm.set_led(False)
-            
+
+            if rising_edge('m'):
+                await arm.set_mag(True)
+            if falling_edge('m'):
+                await arm.set_mag(False)
+
             # Check for c key rising edge to clear pending edges when switching modes
             c_rising = rising_edge('c')
             
