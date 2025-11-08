@@ -20,7 +20,7 @@ def map_vel(val):
     return from_bipolar(val)
 
 class ArmBLEClient:
-    def __init__(self, device_name="RoboArm", base_uuid="12345678-1234-5678-1234-56789abcdef"):
+    def __init__(self, device_name="RoboArm1", base_uuid="12345678-1234-5678-1234-56789abcdef"):
         self.device_name = device_name
         self.base_uuid = base_uuid
         self.device = None

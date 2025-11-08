@@ -50,10 +50,6 @@ def set_vy(value):
 def set_w(value):
     """Handle angular velocity control"""
     w = bs.to_bipolar(value)
-
-    # Bypass encoder for testing
-    motor.set_power(w)
-    return
     w_counts = platform.degs_to_counts(w * 128)  # Scale to ±128 deg/s
     platform.set_vel(w_counts)
 

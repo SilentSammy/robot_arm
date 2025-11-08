@@ -8,6 +8,117 @@ from machine import Pin, PWM
 import machine
 import time
 import math
+import bluetooth
+from micropython import const
+
+# Global BLE setup
+DEVICE_NAME = "RoboArm1"
+_ble = bluetooth.BLE()
+_ble.active(True)
+
+# Global state
+control_callbacks = {}  # Dictionary mapping control IDs to callback functions
+_connections = set()    # Set of connected devices
+_handles = {}           # Dictionary mapping control IDs to characteristic handles
+
+def _ble_irq(event, data):
+    """Handle BLE events through interrupts"""
+    if event == 1:  # _IRQ_CENTRAL_CONNECT
+        conn_handle, _, _ = data
+        _connections.add(conn_handle)
+        print('Client connected')
+        
+    elif event == 2:  # _IRQ_CENTRAL_DISCONNECT
+        conn_handle, _, _ = data
+        _connections.remove(conn_handle)
+        print('Client disconnected')
+        _advertise()
+        
+    elif event == 3:  # _IRQ_GATTS_WRITE
+        conn_handle, value_handle = data
+        if conn_handle in _connections:
+            # Find which control ID this handle belongs to
+            for control_id, handle in _handles.items():
+                if handle == value_handle:
+                    payload = _ble.gatts_read(value_handle)
+                    if payload and control_id in control_callbacks:
+                        # Call the corresponding callback with the integer value
+                        control_callbacks[control_id](payload[0])
+                    break
+
+def _advertise(interval_us=100000):
+    """Start advertising the BLE service"""
+    name = DEVICE_NAME.encode()
+    adv_data = bytearray([
+        0x02, 0x01, 0x06,  # General discoverable mode
+        len(name) + 1, 0x09]) + name  # Complete Local Name
+    _ble.gap_advertise(interval_us, adv_data)
+
+def stop():
+    """Stop the BLE server and clean up"""
+    # Stop advertising
+    _ble.gap_advertise(None)
+    
+    # Remove IRQ handler
+    _ble.irq(None)
+    
+    # Disconnect any active connections
+    for conn_handle in _connections.copy():  # Use copy since we're modifying the set
+        _ble.gap_disconnect(conn_handle)
+        _connections.remove(conn_handle)
+    
+    print("BLE Server stopped")
+
+def start():
+    """Initialize and start the BLE server"""
+    global _handles
+    
+    # Ensure clean state
+    stop()
+    
+    if not control_callbacks:
+        raise ValueError("No callbacks defined!")
+        
+    _ble.config(gap_name=DEVICE_NAME)
+    
+    # Create characteristics for each callback
+    characteristics = []
+    control_ids = sorted(control_callbacks.keys())  # Sort for consistent ordering
+    
+    for control_id in control_ids:
+        uuid = bluetooth.UUID('12345678-1234-5678-1234-56789abcdef' + hex(control_id)[2:])
+        characteristics.append(
+            (uuid, bluetooth.FLAG_READ | bluetooth.FLAG_WRITE | bluetooth.FLAG_NOTIFY)
+        )
+    
+    # Register all characteristics under one service
+    service_handles = _ble.gatts_register_services(((
+        bluetooth.UUID('12345678-1234-5678-1234-56789abcdef0'),  # Service UUID
+        tuple(characteristics),
+    ),))
+    
+    # Map control IDs to their handles and initialize to 0
+    _handles.clear()
+    for i, control_id in enumerate(control_ids):
+        handle = service_handles[0][i]
+        _handles[control_id] = handle
+        _ble.gatts_write(handle, bytes([0]))
+        
+    # Set up event handler and start advertising
+    _ble.irq(_ble_irq)
+    _advertise()
+    
+    print(f"BLE Server started with {len(control_callbacks)} controls")
+    print(f"Advertising as {DEVICE_NAME}")
+
+# Conversion helpers
+def to_norm(value):
+    """Convert 0-255 to 0.0-1.0 float"""
+    return value / 256.0
+
+def to_bipolar(value):
+    """Convert 0-255 to -1.0-1.0 float"""
+    return (value - 128) / 128.0
 
 class Encoder:
     def __init__(self, pin_a, pin_b):
@@ -733,18 +844,18 @@ class Arm2D:
 
 # Inicializar motores y sensores
 # Initialize arm (servo motors and joints)
-_servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
-_servo_b = ServoMotor(19, scale=-1.0, start_angle=-120)  # GPIO19 - excellent PWM pin for servos
-_shoulder = Joint(_servo_a)
-_elbow = Joint(_servo_b)
-_arm = Arm2D(_shoulder, _elbow)
-_arm.enable()
+servo_a = ServoMotor(18, start_angle=60)  # GPIO18 - excellent PWM pin for servos
+servo_b = ServoMotor(19, scale=-1.0, start_angle=-120)  # GPIO19 - excellent PWM pin for servos
+shoulder = Joint(servo_a)
+elbow = Joint(servo_b)
+arm = Arm2D(shoulder, elbow)
+arm.enable()
 
 # Initialize platform (DC motor and encoder)
-_motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
-_encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
-_platform = EncodedMotor(_motor, _encoder)
-_platform.enable()
+motor = DCMotor(ena_pin=25, in1_pin=26, in2_pin=27)
+encoder = Encoder(pin_a=32, pin_b=33)  # GPIO32/33 for encoder channels A/B
+platform = EncodedMotor(motor, encoder)
+platform.enable()
 
 # Initialize electromagnet
 mag = Pin(15, Pin.OUT)
@@ -765,8 +876,8 @@ def moverHombro(angulo, velocidad=10):
     - angulo: Ángulo objetivo en grados
     - velocidad: Velocidad de movimiento (grados/segundo)
     """
-    _shoulder.enable()  # Habilita control individual del hombro
-    _shoulder.move_to(angulo, velocidad)
+    shoulder.enable()  # Habilita control individual del hombro
+    shoulder.move_to(angulo, velocidad)
 
 def moverCodo(angulo, velocidad=10):
     """
@@ -776,8 +887,8 @@ def moverCodo(angulo, velocidad=10):
     - angulo: Ángulo objetivo en grados
     - velocidad: Velocidad de movimiento (grados/segundo)
     """
-    _elbow.enable()  # Habilita control individual del codo
-    _elbow.move_to(angulo, velocidad)
+    elbow.enable()  # Habilita control individual del codo
+    elbow.move_to(angulo, velocidad)
 
 def incHombro(incremento, velocidad=10):
     """
@@ -787,8 +898,8 @@ def incHombro(incremento, velocidad=10):
     - incremento: Cambio en grados (puede ser negativo)
     - velocidad: Velocidad de movimiento (grados/segundo)
     """
-    _shoulder.enable()
-    _shoulder.move_by(incremento, velocidad)
+    shoulder.enable()
+    shoulder.move_by(incremento, velocidad)
 
 def incCodo(incremento, velocidad=10):
     """
@@ -798,8 +909,8 @@ def incCodo(incremento, velocidad=10):
     - incremento: Cambio en grados (puede ser negativo)
     - velocidad: Velocidad de movimiento (grados/segundo)
     """
-    _elbow.enable()
-    _elbow.move_by(incremento, velocidad)
+    elbow.enable()
+    elbow.move_by(incremento, velocidad)
 
 def velHombro(velocidad_angular):
     """
@@ -808,8 +919,8 @@ def velHombro(velocidad_angular):
     Parámetros:
     - velocidad_angular: Velocidad en grados/segundo (+ o -)
     """
-    _shoulder.enable()
-    _shoulder.set_vel(velocidad_angular)
+    shoulder.enable()
+    shoulder.set_vel(velocidad_angular)
 
 def velCodo(velocidad_angular):
     """
@@ -818,8 +929,8 @@ def velCodo(velocidad_angular):
     Parámetros:
     - velocidad_angular: Velocidad en grados/segundo (+ o -)
     """
-    _elbow.enable()
-    _elbow.set_vel(velocidad_angular)
+    elbow.enable()
+    elbow.set_vel(velocidad_angular)
 
 # =============================================================================
 # CONTROL COORDINADO DEL BRAZO (Arm2D control)
@@ -834,8 +945,8 @@ def moverBrazo(x, y, velocidad=10):
     - y: Coordenada Y en centímetros  
     - velocidad: Velocidad de movimiento (cm/segundo)
     """
-    _arm.enable()  # Habilita control coordinado del brazo
-    _arm.move_to(x, y, velocidad)
+    arm.enable()  # Habilita control coordinado del brazo
+    arm.move_to(x, y, velocidad)
 
 def incBrazo(dx, dy, velocidad=10):
     """
@@ -846,8 +957,8 @@ def incBrazo(dx, dy, velocidad=10):
     - dy: Cambio en Y (centímetros, puede ser negativo)
     - velocidad: Velocidad de movimiento (cm/segundo)
     """
-    _arm.enable()
-    _arm.move_by(dx, dy, velocidad)
+    arm.enable()
+    arm.move_by(dx, dy, velocidad)
 
 def velBrazo(vx, vy):
     """
@@ -857,8 +968,8 @@ def velBrazo(vx, vy):
     - vx: Velocidad en X (cm/segundo)
     - vy: Velocidad en Y (cm/segundo)
     """
-    _arm.enable()
-    _arm.set_vels(vx, vy)
+    arm.enable()
+    arm.set_vels(vx, vy)
 
 def posicionBrazo():
     """
@@ -867,7 +978,7 @@ def posicionBrazo():
     Retorna:
     - tupla (x, y) con coordenadas en centímetros
     """
-    return _arm.FK()
+    return arm.FK()
 
 # =============================================================================
 # CONTROL DE PLATAFORMA GIRATORIA
@@ -881,12 +992,12 @@ def moverPlataforma(angulo, velocidad=10):
     - angulo: Ángulo objetivo en grados
     - velocidad: Velocidad de movimiento (grados/segundo)
     """
-    _platform.enable()
+    platform.enable()
     # Convertir ángulo a counts y establecer velocidad
-    counts = _platform.degs_to_counts(angulo)
-    vel_counts = _platform.degs_to_counts(velocidad)
-    _platform.speed = vel_counts
-    _platform.snap_to(counts)
+    counts = platform.degs_to_counts(angulo)
+    vel_counts = platform.degs_to_counts(velocidad)
+    platform.speed = vel_counts
+    platform.snap_to(counts)
 
 def incPlataforma(incremento, velocidad=10):
     """
@@ -896,12 +1007,12 @@ def incPlataforma(incremento, velocidad=10):
     - incremento: Cambio en grados (puede ser negativo)
     - velocidad: Velocidad de movimiento (grados/segundo)  
     """
-    _platform.enable()
+    platform.enable()
     # Convertir incremento a counts y establecer velocidad
-    inc_counts = _platform.degs_to_counts(incremento)
-    vel_counts = _platform.degs_to_counts(velocidad)
-    _platform.speed = vel_counts
-    _platform.snap_by(inc_counts)
+    inc_counts = platform.degs_to_counts(incremento)
+    vel_counts = platform.degs_to_counts(velocidad)
+    platform.speed = vel_counts
+    platform.snap_by(inc_counts)
 
 def velPlataforma(velocidad_angular):
     """
@@ -910,8 +1021,8 @@ def velPlataforma(velocidad_angular):
     Parámetros:
     - velocidad_angular: Velocidad en grados/segundo (+ o -)
     """
-    _platform.enable()
-    _platform.set_vel(velocidad_angular)
+    platform.enable()
+    platform.set_vel(velocidad_angular)
 
 # =============================================================================
 # FUNCIONES DE UTILIDAD Y CONTROL GENERAL
@@ -919,31 +1030,31 @@ def velPlataforma(velocidad_angular):
 
 def habilitarBrazo():
     """Habilita el control coordinado del brazo (deshabilita control individual)"""
-    _arm.enable()
+    arm.enable()
 
 def deshabilitarBrazo():
     """Deshabilita el control coordinado del brazo"""
-    _arm.disable()
+    arm.disable()
 
 def habilitarPlataforma():
     """Habilita el control de la plataforma giratoria"""
-    _platform.enable()
+    platform.enable()
 
 def deshabilitarPlataforma():
     """Deshabilita el control de la plataforma giratoria"""
-    _platform.disable()
+    platform.disable()
 
 def estadoBrazo():
     """
     Muestra información de depuración sobre el estado del brazo.
     """
-    pos_actual = _arm.FK()
+    pos_actual = arm.FK()
     print(f"Posición actual: ({pos_actual[0]:.2f}, {pos_actual[1]:.2f}) cm")
-    print(f"Objetivo: {_arm.target}")
-    print(f"Velocidad: {_arm.speed}")
-    print(f"Brazo habilitado: {_arm.enabled}")
-    print(f"Hombro habilitado: {_shoulder.enabled}")
-    print(f"Codo habilitado: {_elbow.enabled}")
+    print(f"Objetivo: {arm.target}")
+    print(f"Velocidad: {arm.speed}")
+    print(f"Brazo habilitado: {arm.enabled}")
+    print(f"Hombro habilitado: {shoulder.enabled}")
+    print(f"Codo habilitado: {elbow.enabled}")
 
 def encenderLED():
     """Enciende el LED integrado"""
@@ -989,6 +1100,66 @@ def ejemplo_basico():
     
     print("\nEjemplo completado. Use estadoBrazo() para ver el estado actual.")
 
+def set_led(value):
+    """Handle LED control (0-255, but treat as binary)"""
+    led.value(1 if value else 0)
+
+def set_vx(value):
+    """Handle X velocity control (-128 to 127 cm/s)"""
+    vx = to_bipolar(value) * 128
+    arm.set_vels(vx=vx)  # Update only X component
+
+    # Debug
+    print(f"Value: {value}, Vx: {vx}, Arm target: {arm.target}, Arm pos: {arm.FK()}, speed: {arm.speed}")
+
+def set_vy(value):
+    """Handle Y velocity control (-128 to 127 cm/s)"""
+    vy = to_bipolar(value) * 128
+    arm.set_vels(vy=vy)  # Update only Y component
+
+def set_w(value):
+    """Handle angular velocity control"""
+    w = to_bipolar(value)
+    # w_counts = platform.degs_to_counts(w * 128)  # Scale to ±128 deg/s
+    # platform.set_vel(w_counts)
+    platform.disable()
+    motor.set_power(w)  # Direct control for simplicity
+
+def set_mag(value):
+    """Handle electromagnet control (0-255, but treat as binary)"""
+    mag.value(1 if value else 0)
+
+def inc_x(value):
+    """Increment X position by a small amount (-30 to 30 cm)"""
+    delta = to_bipolar(value) * 32  # Scale to ±32 cm
+    arm.move_by(dx=delta)
+    
+    # Debug
+    print(f"Value: {value}, Delta X: {delta}, Arm target: {arm.target}, Arm pos: {arm.FK()}, speed: {arm.speed}")
+
+def inc_y(value):
+    """Increment Y position by a small amount (-30 to 30 cm)"""
+    delta = to_bipolar(value) * 32  # Scale to ±32 cm
+    arm.move_by(dy=delta)
+
+def inc_theta(value):
+    """Increment angle by a small amount (-90 to 90 degrees)"""
+    delta = to_bipolar(value) * 128  # Scale to ±128 degrees
+    platform.snap_by(delta)
+
+# Set up BLE server
+# bs.DEVICE_NAME = "RoboArm"
+control_callbacks = {
+    1: set_led,
+    2: set_vx,
+    3: set_vy,
+    4: set_w,
+    5: set_mag,
+    6: inc_x,
+    7: inc_y,
+    8: inc_theta,
+}
+
 if __name__ == "__main__":
     print("Módulo brazo_simple cargado correctamente")
     print("Funciones disponibles:")
@@ -997,3 +1168,4 @@ if __name__ == "__main__":
     print("- Plataforma: moverPlataforma(), incPlataforma(), velPlataforma()")
     print("- Utilidades: estadoBrazo(), encenderLED(), apagarLED(), encenderIman(), apagarIman()")
     print("- Ejecute ejemplo_basico() para ver una demostración")
+    start()

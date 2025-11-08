@@ -3,7 +3,7 @@ import bluetooth
 from micropython import const
 
 # Global BLE setup
-DEVICE_NAME = "MicroLED"
+DEVICE_NAME = "RoboArm"
 _ble = bluetooth.BLE()
 _ble.active(True)
 
